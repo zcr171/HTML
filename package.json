@@ -1,0 +1,35 @@
+{
+  "name": "industrial-visualization-backend",
+  "version": "1.0.0",
+  "description": "Backend service for industrial visualization system",
+  "main": "backend/index.js",
+  "scripts": {
+    "start": "node backend/index.js",
+    "dev": "nodemon backend/index.js",
+    "start:old": "node backend-refactored.js"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "csv-parser": "^3.2.0",
+    "dotenv": "^17.2.4",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.3",
+    "mqtt": "^5.15.0",
+    "multer": "^2.0.2",
+    "mysql2": "^3.9.1",
+    "sequelize": "^6.35.1",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": [
+    "industrial",
+    "visualization",
+    "mqtt",
+    "mysql"
+  ],
+  "author": "",
+  "license": "MIT"
+}

@@ -1,0 +1,2964 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业管理与维护网</title>
+    <script>
+        // 登录状态检查（在页面渲染前执行，避免闪现主页）
+        let token = null;
+        try {
+            // 尝试获取token，捕获可能的错误
+            token = localStorage.getItem('token');
+        } catch (error) {
+            console.log('localStorage访问被阻止，视为未登录');
+            token = null;
+        }
+        if (!token) {
+            // 未登录，立即重定向到登录页面，不渲染后续内容
+            window.location.href = '/src/pages/login.html';
+        }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.bootcdn.net/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+    <link rel="stylesheet" href="src/css/style.css">
+    <style>
+        /* 强制所有搜索下拉框层级最高，避免被遮挡 */
+        #search-results,
+        [id*="search-result"],
+        .dropdown-menu {
+            z-index: 99999 !important;
+            position: relative !important;
+        }
+        /* 综合概况卡片压缩样式 */
+        .card .card-header {
+            padding: 0.5rem 1rem !important;
+        }
+        .card .data-value {
+            font-size: 1.25rem !important;
+            padding: 0.1rem 1rem !important;
+            margin: 0 !important;
+        }
+        .card .text-sm {
+            padding: 0 1rem 0.5rem 1rem !important;
+            font-size: 0.75rem !important;
+        }
+        .card p {
+            margin: 0.1rem 0 !important;
+        }
+        .card td, .card th {
+            padding: 0.3rem 0.6rem !important;
+            font-size: 0.75rem !important;
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#0ea5e9',
+                        secondary: '#1e40af',
+                        dark: '#0f172a',
+                        light: '#f1f5f9',
+                        warning: '#f59e0b',
+                        danger: '#ef4444',
+                        success: '#10b981'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        };
+    </script>
+    <!-- 实时数据表格可拖拽列宽样式 -->
+    <style>
+        .data-table th, .data-table td {
+            white-space: nowrap;
+            overflow: visible;
+            padding: 0.5rem 0.75rem;
+            position: relative;
+        }
+        .data-table th .resizer {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 5px;
+            height: 100%;
+            background: transparent;
+            cursor: col-resize;
+            user-select: none;
+        }
+        .data-table th .resizer:hover {
+            background: rgba(59, 130, 246, 0.3);
+        }
+    </style>
+
+    <!-- 表格列宽拖拽脚本 -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const table = document.querySelector('.data-table');
+            if (!table) return;
+            
+            const headers = table.querySelectorAll('th');
+            headers.forEach((header, index) => {
+                // 添加拖拽手柄
+                const resizer = document.createElement('div');
+                resizer.className = 'resizer';
+                header.appendChild(resizer);
+                
+                let startX, startWidth;
+                resizer.addEventListener('mousedown', function(e) {
+                    startX = e.pageX;
+                    startWidth = header.offsetWidth;
+                    
+                    const onMouseMove = function(e) {
+                        const diffX = e.pageX - startX;
+                        header.style.width = `${startWidth + diffX}px`;
+                        header.style.minWidth = `${startWidth + diffX}px`;
+                    };
+                    
+                    const onMouseUp = function() {
+                        document.removeEventListener('mousemove', onMouseMove);
+                        document.removeEventListener('mouseup', onMouseUp);
+                    };
+                    
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
+                    
+                    e.preventDefault();
+                });
+            });
+        });
+    </script>
+</head>
+<body class="min-h-screen overflow-x-hidden">
+    
+    <!-- 主系统界面 -->
+    <div id="main-page" class="flex h-screen overflow-hidden">
+        <div class="sidebar w-40 flex flex-col py-6 px-2 text-white">
+            <div class="mb-12 text-center">
+                <h1 class="text-xl font-bold">企业管理与运维</h1>
+                <p class="text-xs text-gray-400">Industrial Internet</p>
+            </div>
+            <div class="flex flex-col space-y-3 w-full">
+                <!-- 主菜单：综合概况（默认显示） -->
+                <button class="menu-item active flex items-center space-x-2 px-2 py-2 rounded-lg bg-primary/20 text-white transition-all duration-300" data-target="overview">
+                    <i class="fa fa-dashboard text-sm"></i>
+                    <span class="text-sm font-medium">综合概况</span>
+                </button>
+
+                <!-- 一级菜单：工业综合概况（默认收起） -->
+                <div class="menu-group">
+                    <button class="menu-group-header flex items-center justify-between w-full px-2 py-2 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-group="industry-overview">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa fa-industry text-sm"></i>
+                            <span class="text-sm font-medium">数据中心</span>
+                        </div>
+                        <i class="fa fa-chevron-right text-xs transition-transform duration-300"></i>
+                    </button>
+                    <div class="menu-group-content ml-4 mt-1 space-y-1 hidden overflow-hidden transition-all duration-300 max-h-0 bg-[#1e293b] relative z-10" id="industry-overview">
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="realtime-data">
+                            <i class="fa fa-tachometer text-xs"></i>
+                            <span class="text-xs font-medium">实时数据</span>
+                        </button>
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="alarm-data">
+                            <i class="fa fa-bell text-xs"></i>
+                            <span class="text-xs font-medium">实时报警</span>
+                        </button>
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="history-data">
+                            <i class="fa fa-history text-xs"></i>
+                            <span class="text-xs font-medium">历史数据</span>
+                        </button>
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="history-alarm-data">
+                            <i class="fa fa-exclamation-circle text-xs"></i>
+                            <span class="text-xs font-medium">历史报警</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 一级菜单：资料中心 -->
+                <div class="menu-group">
+                    <button class="menu-group-header flex items-center justify-between w-full px-2 py-2 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-group="industry-db">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa fa-database text-sm"></i>
+                            <span class="text-sm font-medium">资料中心</span>
+                        </div>
+                        <i class="fa fa-chevron-right text-xs transition-transform duration-300"></i>
+                    </button>
+                    <div class="menu-group-content ml-4 mt-1 space-y-1 hidden overflow-hidden transition-all duration-300 max-h-0 bg-[#1e293b] relative z-10" id="industry-db">
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="db-laws">
+                            <i class="fa fa-gavel text-xs"></i>
+                            <span class="text-xs font-medium">法律法规</span>
+                        </button>
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="db-standards">
+                            <i class="fa fa-book text-xs"></i>
+                            <span class="text-xs font-medium">标准规范</span>
+                        </button>
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="db-rules">
+                            <i class="fa fa-file-text text-xs"></i>
+                            <span class="text-xs font-medium">企业制度</span>
+                        </button>
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="db-drawings">
+                            <i class="fa fa-paint-brush text-xs"></i>
+                            <span class="text-xs font-medium">图纸中心</span>
+                        </button>
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="db-maintain">
+                            <i class="fa fa-graduation-cap text-xs"></i>
+                            <span class="text-xs font-medium">学习中心</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 一级菜单：化工行业工具 -->
+                <div class="menu-group">
+                    <button class="menu-group-header flex items-center justify-between w-full px-2 py-2 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-group="chem-tools">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa fa-calculator text-sm"></i>
+                            <span class="text-sm font-medium">化工行业工具</span>
+                        </div>
+                        <i class="fa fa-chevron-right text-xs transition-transform duration-300"></i>
+                    </button>
+                    <div class="menu-group-content ml-4 mt-1 space-y-1 hidden overflow-hidden transition-all duration-300 max-h-0 bg-[#1e293b] relative z-10" id="chem-tools">
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="tool-chem">
+                            <i class="fa fa-flask text-xs"></i>
+                            <span class="text-xs font-medium">化工专业类</span>
+                        </button>
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="tool-equip">
+                            <i class="fa fa-cogs text-xs"></i>
+                            <span class="text-xs font-medium">设备专业类</span>
+                        </button>
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="tool-elec">
+                            <i class="fa fa-bolt text-xs"></i>
+                            <span class="text-xs font-medium">电气仪表类</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 一级菜单：系统管理（仅管理员可见） -->
+                <div class="menu-group" id="admin-menu-group" style="display: none;">
+                    <button class="menu-group-header flex items-center justify-between w-full px-2 py-2 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-group="admin-system">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa fa-cog text-sm"></i>
+                            <span class="text-sm font-medium">系统管理</span>
+                        </div>
+                        <i class="fa fa-chevron-right text-xs transition-transform duration-300"></i>
+                    </button>
+                    <div class="menu-group-content ml-4 mt-1 space-y-1 hidden overflow-hidden transition-all duration-300 max-h-0 bg-[#1e293b] relative z-10" id="admin-system">
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="admin-user">
+                            <i class="fa fa-users text-xs"></i>
+                            <span class="text-xs font-medium">用户管理</span>
+                        </button>
+                        <button class="menu-item flex items-center space-x-2 px-2 py-1.5 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-target="admin-device">
+                            <i class="fa fa-microchip text-xs"></i>
+                            <span class="text-xs font-medium">设备管理</span>
+                        </button>
+                    </div>
+            </div>
+        </div>
+
+        <!-- 新增用户模态框 -->
+        <div id="add-user-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-[99999999] hidden">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
+                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <h3 class="text-lg font-bold text-gray-800">新增用户</h3>
+                    <button id="close-add-user-modal" class="text-gray-400 hover:text-gray-600">
+                        <i class="fa fa-times text-xl"></i>
+                    </button>
+                </div>
+                <div class="px-6 py-4 space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">账号 <span class="text-red-500">*</span></label>
+                        <input type="text" id="new-username" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-black" placeholder="请输入登录账号" style="color: #000 !important;">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">密码 <span class="text-red-500">*</span></label>
+                        <input type="password" id="new-password" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-black" placeholder="请输入登录密码" style="color: #000 !important;">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">真实姓名 <span class="text-red-500">*</span></label>
+                        <input type="text" id="new-realname" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-black" placeholder="请输入真实姓名" style="color: #000 !important;">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">厂区权限（位掩码值） <span class="text-red-500">*</span></label>
+                        <input type="number" id="new-factory-level" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-black" placeholder="例：2=热电、4=气化、99=超级管理员" value="0" style="color: #000 !important;">
+                        <p class="text-xs text-gray-500 mt-1">权限值相加：RD=2、QH=4、JH=8、HS=16、DW=32</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">操作等级 <span class="text-red-500">*</span></label>
+                        <input type="number" id="new-area-level" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-black" placeholder="请输入操作等级" value="1" style="color: #000 !important;">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">状态 <span class="text-red-500">*</span></label>
+                        <select id="new-enabled" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-black" style="color: #000 !important;">
+                            <option value="1">启用</option>
+                            <option value="0">禁用</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="px-6 py-3 border-t border-gray-200 flex justify-end space-x-3">
+                    <button id="cancel-add-user" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-all">取消</button>
+                    <button id="confirm-add-user" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-all">确认新增</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 多级菜单折叠逻辑 -->
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    // 一级菜单折叠/展开（带动画效果+手风琴模式：点击一个其他自动收起）
+                    document.querySelectorAll('.menu-group-header').forEach(header => {
+                        header.addEventListener('click', function() {
+                            const groupId = this.dataset.group;
+                            const currentContent = document.getElementById(groupId);
+                            const currentIcon = this.querySelector('.fa-chevron-down, .fa-chevron-right');
+                            const isCurrentHidden = currentContent.classList.contains('hidden');
+
+                            // 第一步：先收起所有其他展开的菜单组
+                            let hasOtherOpen = false;
+                            document.querySelectorAll('.menu-group-content').forEach(content => {
+                                if (content.id !== groupId && !content.classList.contains('hidden')) {
+                                    hasOtherOpen = true;
+                                    const otherHeader = document.querySelector(`[data-group="${content.id}"]`);
+                                    const otherIcon = otherHeader.querySelector('.fa-chevron-down, .fa-chevron-right');
+                                    // 执行收起动画
+                                    content.style.maxHeight = content.scrollHeight + 'px';
+                                    setTimeout(() => {
+                                        content.style.maxHeight = '0';
+                                        setTimeout(() => {
+                                            content.classList.add('hidden');
+                                        }, 300);
+                                    }, 10);
+                                    otherIcon.classList.remove('fa-chevron-down');
+                                    otherIcon.classList.add('fa-chevron-right');
+                                }
+                            });
+
+                            // 第二步：处理当前点击的菜单组，等其他菜单收起动画完成后再展开当前的，避免重叠
+                            const processCurrent = () => {
+                                if (isCurrentHidden) {
+                                    currentContent.classList.remove('hidden');
+                                    // 渐进式展开动画
+                                    currentContent.style.maxHeight = currentContent.scrollHeight + 'px';
+                                    setTimeout(() => {
+                                        currentContent.style.maxHeight = 'none';
+                                    }, 300);
+                                    currentIcon.classList.remove('fa-chevron-right');
+                                    currentIcon.classList.add('fa-chevron-down');
+                                } else {
+                                    // 渐进式收起动画
+                                    currentContent.style.maxHeight = currentContent.scrollHeight + 'px';
+                                    setTimeout(() => {
+                                        currentContent.style.maxHeight = '0';
+                                        setTimeout(() => {
+                                            currentContent.classList.add('hidden');
+                                        }, 300);
+                                    }, 10);
+                                    currentIcon.classList.remove('fa-chevron-down');
+                                    currentIcon.classList.add('fa-chevron-right');
+                                }
+                            };
+
+                            // 如果有其他菜单打开，等300ms收起动画完成再展开当前，否则直接处理
+                            if (hasOtherOpen) {
+                                setTimeout(processCurrent, 320);
+                            } else {
+                                processCurrent();
+                            }
+                        });
+                    });
+                });
+            </script>
+
+            <!-- 管理员功能脚本 -->
+            <script>
+                // 加载用户列表
+                async function loadUserList() {
+                    const token = localStorage.getItem('token');
+                    if (!token) return;
+
+                    try {
+                        const response = await fetch(`${API_BASE_URL}/admin/users`, {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            const tbody = document.getElementById('user-list-body');
+                            if (!tbody) return;
+                            
+                            let html = '';
+                            data.data.forEach(user => {
+                                // 解析厂区权限名称
+                                const factories = [];
+                                if (user.factory_level === 99) {
+                                    factories.push('超级管理员');
+                                } else {
+                                    if (user.factory_level & 2) factories.push('RD');
+                                    if (user.factory_level & 4) factories.push('QH');
+                                    if (user.factory_level & 8) factories.push('JH');
+                                    if (user.factory_level & 16) factories.push('HS');
+                                    if (user.factory_level & 32) factories.push('DW');
+                                }
+                                const factoryText = factories.join('、') || '无';
+                                
+                                html += `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">${user.id}</td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">${user.username}</td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">${user.realname || '-'}</td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">${factoryText} (${user.factory_level})</td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">${user.area_level}</td>
+                                        <td class="px-4 py-3 whitespace-nowrap">
+                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.enabled === 1 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                                                ${user.enabled === 1 ? '启用' : '禁用'}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">${user.create_time || '-'}</td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-sm font-medium space-x-2">
+                                            <button class="text-indigo-600 hover:text-indigo-900" onclick="editUser(${user.id})">编辑</button>
+                                            <button class="text-yellow-600 hover:text-yellow-900" onclick="resetUserPassword(${user.id})">重置密码</button>
+                                            <button class="text-red-600 hover:text-red-900" onclick="deleteUser(${user.id})">删除</button>
+                                        </td>
+                                    </tr>
+                                `;
+                            });
+                            tbody.innerHTML = html;
+                        }
+                    } catch (error) {
+                        console.error('加载用户列表失败:', error);
+                        alert('加载用户列表失败，请刷新重试');
+                    }
+                }
+
+                // 新增用户
+                async function addNewUser(userData) {
+                    const token = localStorage.getItem('token');
+                    if (!token) return;
+
+                    try {
+                        const response = await fetch(`${API_BASE_URL}/admin/users`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`
+                            },
+                            body: JSON.stringify(userData)
+                        });
+                        const data = await response.json();
+                        return data;
+                    } catch (error) {
+                        console.error('新增用户失败:', error);
+                        return { success: false, message: '网络请求失败' };
+                    }
+                }
+
+                // 页面加载完成后绑定管理员事件
+                document.addEventListener('DOMContentLoaded', function() {
+                    // 新增用户按钮事件
+                    const addUserBtn = document.getElementById('add-user-btn');
+                    const addUserModal = document.getElementById('add-user-modal');
+                    const closeAddUserModal = document.getElementById('close-add-user-modal');
+                    const cancelAddUser = document.getElementById('cancel-add-user');
+                    const confirmAddUser = document.getElementById('confirm-add-user');
+
+                    if (addUserBtn) {
+                        addUserBtn.addEventListener('click', function() {
+                            addUserModal.classList.remove('hidden');
+                        });
+                    }
+
+                    // 关闭模态框
+                    function closeModal() {
+                        addUserModal.classList.add('hidden');
+                        // 清空表单
+                        document.getElementById('new-username').value = '';
+                        document.getElementById('new-password').value = '';
+                        document.getElementById('new-realname').value = '';
+                        document.getElementById('new-factory-level').value = '0';
+                        document.getElementById('new-area-level').value = '1';
+                        document.getElementById('new-enabled').value = '1';
+                    }
+
+                    if (closeAddUserModal) closeAddUserModal.addEventListener('click', closeModal);
+                    if (cancelAddUser) cancelAddUser.addEventListener('click', closeModal);
+
+                    // 点击模态框外部关闭
+                    if (addUserModal) {
+                        addUserModal.addEventListener('click', function(e) {
+                            if (e.target === addUserModal) closeModal();
+                        });
+                    }
+
+                    // 确认新增用户
+                    if (confirmAddUser) {
+                        confirmAddUser.addEventListener('click', async function() {
+                            const username = document.getElementById('new-username').value.trim();
+                            const password = document.getElementById('new-password').value.trim();
+                            const realname = document.getElementById('new-realname').value.trim();
+                            const factory_level = parseInt(document.getElementById('new-factory-level').value) || 0;
+                            const area_level = parseInt(document.getElementById('new-area-level').value) || 1;
+                            const enabled = parseInt(document.getElementById('new-enabled').value);
+
+                            // 验证必填字段
+                            if (!username || !password || !realname) {
+                                alert('请填写所有必填字段');
+                                return;
+                            }
+
+                            confirmAddUser.disabled = true;
+                            confirmAddUser.innerHTML = '<i class="fa fa-spinner fa-spin mr-1"></i> 提交中...';
+
+                            try {
+                                const result = await addNewUser({ username, password, realname, factory_level, area_level, enabled });
+                                
+                                if (result.success) {
+                                    alert('用户新增成功');
+                                    closeModal();
+                                    loadUserList(); // 刷新列表
+                                } else {
+                                    alert('新增失败: ' + result.message);
+                                }
+                            } catch (error) {
+                                alert('网络请求失败，详细错误: ' + error.message + '\n请检查后端服务是否正常运行，或按F12查看控制台详情');
+                                console.error('新增用户详细错误:', error);
+                            }
+
+                            confirmAddUser.disabled = false;
+                            confirmAddUser.innerHTML = '确认新增';
+                        });
+                    }
+
+                    // 当切换到用户管理页面时自动加载用户列表
+                    const userMenu = document.querySelector('.menu-item[data-target="admin-user"]');
+                    if (userMenu) {
+                        userMenu.addEventListener('click', function() {
+                            setTimeout(loadUserList, 100);
+                        });
+                    }
+                });
+            </script>
+
+            <div class="mt-auto w-full">
+                <div class="px-4 py-3 bg-gray-700/50 rounded-lg">
+                    <div class="flex flex-col space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm">实时库</span>
+                            <div class="flex space-x-2">
+                                <div id="mqtt-primary-status" class="status-indicator status-offline"></div>
+                                <div id="mqtt-backup-status" class="status-indicator status-offline"></div>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-sm">数据库</span>
+                            <div class="flex space-x-2">
+                                <div id="mysql-primary-status" class="status-indicator status-offline"></div>
+                                <div id="mysql-backup-status" class="status-indicator status-offline"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex justify-center mt-2" id="admin-config-btn-container">
+                        <!-- 配置按钮将由超级管理员登录后动态生成 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="flex-1 flex flex-col overflow-hidden overflow-x-hidden">
+            <header class="bg-white shadow-sm py-2 px-6 flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <h2 id="page-title" class="text-lg font-bold text-gray-800">综合概况</h2>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm text-gray-600">系统时间: </span>
+                        <span id="system-time" class="text-sm font-medium text-gray-800"></span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm text-gray-600">登录人: </span>
+                        <span id="login-user" class="text-sm font-medium text-gray-800">未登录</span>
+                    </div>
+                    <button id="logout-btn" class="px-3 py-1 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
+                        <i class="fa fa-sign-out mr-1"></i> 注销
+                    </button>
+                </div>
+            </header>
+            <main class="flex-1 overflow-y-auto overflow-x-hidden p-4 bg-gray-50" style="min-height: 0;">
+                <div id="overview" class="page-content hidden w-full min-h-full">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
+                        <div class="card">
+                            <div class="card-header pb-0">
+                                <span class="text-sm">系统状态</span>
+                                <i class="fa fa-heartbeat text-primary text-sm"></i>
+                            </div>
+                            <div class="data-value py-0 my-0">
+                                <span class="status-indicator status-online"></span>
+                                <span>正常运行</span>
+                            </div>
+                            <div class="text-sm text-gray-500 mt-0 pt-0 pb-1">
+                                运行时间: <span id="overview-system-uptime">0天 00:00:00</span>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="text-sm">设备总数</span>
+                                <i class="fa fa-industry text-primary text-sm"></i>
+                            </div>
+                            <div class="data-value" id="total-devices-overview">0</div>
+                            <div class="text-sm text-gray-500 mt-2">
+                                <span class="text-success"><i class="fa fa-arrow-up mr-1"></i>5.2%</span> 较昨日
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="text-sm">在线设备</span>
+                                <i class="fa fa-check-circle text-success text-sm"></i>
+                            </div>
+                            <div class="data-value" id="online-devices-overview">0</div>
+                            <div class="text-sm text-gray-500 mt-2">
+                                <span class="text-success"><i class="fa fa-arrow-up mr-1"></i>2.1%</span> 较昨日
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="text-sm">全厂自控率</span>
+                                <i class="fa fa-sliders text-primary text-sm"></i>
+                            </div>
+                            <div class="data-value" id="auto-control-rate">0%</div>
+                            <div class="text-sm text-gray-500 mt-2">
+                                <span class="text-success"><i class="fa fa-arrow-up mr-1"></i>1.5%</span> 较昨日
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="text-sm">报警数量</span>
+                                <i class="fa fa-exclamation-triangle text-warning text-sm"></i>
+                            </div>
+                            <div class="data-value" id="alarm-count-overview">0</div>
+                            <div class="text-sm text-gray-500 mt-2">
+                                <span class="text-danger"><i class="fa fa-arrow-up mr-1"></i>12.5%</span> 较昨日
+                            </div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="text-sm">设备状态分布</span>
+                                <i class="fa fa-pie-chart text-primary text-sm"></i>
+                            </div>
+                            <div class="p-1">
+                                  <canvas id="device-status-chart" height="100"></canvas>
+                              </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="text-sm">报警类型分布</span>
+                                <i class="fa fa-bar-chart text-primary text-sm"></i>
+                            </div>
+                            <div class="p-1">
+                                  <canvas id="alarm-type-chart" height="140"></canvas>
+                              </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="text-sm">系统消息</span>
+                            <i class="fa fa-bullhorn text-primary text-sm"></i>
+                        </div>
+                        <div class="p-2 space-y-2">
+                            <div class="flex items-start space-x-2">
+                                <div class="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
+                                    <i class="fa fa-info text-primary text-xs"></i>
+                                </div>
+                                <div>
+                                    <h4 class="text-xs font-medium text-gray-800">系统更新</h4>
+                                    <p class="text-[10px] text-gray-500">系统已成功更新到最新版本 v1.0.1</p>
+                                    <p class="text-[10px] text-gray-400 mt-0.5">2026-02-02 10:30:00</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start space-x-2">
+                                <div class="flex-shrink-0 w-6 h-6 rounded-full bg-success/10 flex items-center justify-center">
+                                    <i class="fa fa-check text-success text-xs"></i>
+                                </div>
+                                <div>
+                                    <h4 class="text-xs font-medium text-gray-800">数据库备份</h4>
+                                    <p class="text-[10px] text-gray-500">系统已完成每日数据库备份</p>
+                                    <p class="text-[10px] text-gray-400 mt-0.5">2026-02-02 00:00:00</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start space-x-2">
+                                <div class="flex-shrink-0 w-6 h-6 rounded-full bg-warning/10 flex items-center justify-center">
+                                    <i class="fa fa-exclamation text-warning text-xs"></i>
+                                </div>
+                                <div>
+                                    <h4 class="text-xs font-medium text-gray-800">磁盘空间警告</h4>
+                                    <p class="text-[10px] text-gray-500">系统磁盘空间使用已达到80%，请及时清理</p>
+                                    <p class="text-[10px] text-gray-400 mt-0.5">2026-02-01 16:45:00</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="realtime-data" class="page-content hidden overflow-hidden">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-4">
+                        <div class="card">
+                            <div class="card-header">
+                            <span class="text-sm">设备总数</span>
+                            <i class="fa fa-industry text-primary text-sm"></i>
+                        </div>
+                            <div class="data-value" id="total-devices">0</div>
+                            <div class="text-sm text-gray-500 mt-2">
+                                <span class="text-success"><i class="fa fa-arrow-up mr-1"></i>5.2%</span> 较昨日
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="text-sm">在线设备</span>
+                                <i class="fa fa-check-circle text-success text-sm"></i>
+                            </div>
+                            <div class="data-value" id="online-devices">0</div>
+                            <div class="text-sm text-gray-500 mt-2">
+                                <span class="text-success"><i class="fa fa-arrow-up mr-1"></i>2.1%</span> 较昨日
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="text-sm">报警数量</span>
+                                <i class="fa fa-exclamation-triangle text-warning text-sm"></i>
+                            </div>
+                            <div class="data-value" id="alarm-count">0</div>
+                            <div class="text-sm text-gray-500 mt-2">
+                                <span class="text-danger"><i class="fa fa-arrow-up mr-1"></i>12.5%</span> 较昨日
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="text-sm">系统状态</span>
+                                <i class="fa fa-heartbeat text-primary text-sm"></i>
+                            </div>
+                            <div class="data-value">
+                                <span class="status-indicator status-online"></span>
+                                <span>正常运行</span>
+                            </div>
+                            <div class="text-sm text-gray-500 mt-2">
+                                运行时间: <span id="system-uptime">0天 00:00:00</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="text-sm">设备实时数据</span>
+                            <div class="flex space-x-1">
+                                <button class="text-xs px-2 py-0.5 rounded bg-primary text-white hover:bg-primary/90 transition-colors">
+                                    <i class="fa fa-refresh mr-1 text-xs"></i> 刷新
+                                </button>
+                                <button onclick="exportDeviceList()" class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors">
+                                    <i class="fa fa-download mr-1 text-xs"></i> 导出设备清单
+                                </button>
+                            </div>
+                        </div>
+                        <div class="max-h-[calc(100vh-320px)] overflow-x-auto overflow-y-auto">
+                            <table class="w-full text-sm text-left text-gray-700 dark:text-gray-300 data-table">
+                                <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-300 sticky top-0">
+                                    <tr>
+                                        <th scope="col" class="px-3 py-2 text-center">位号</th>
+                                        <th scope="col" class="px-3 py-2 text-center">描述</th>
+                                        <th scope="col" class="px-3 py-2 text-center">实时数据</th>
+                                        <th scope="col" class="px-3 py-2 text-center">量程</th>
+                                        <th scope="col" class="px-3 py-2 text-center">高高限</th>
+                                        <th scope="col" class="px-3 py-2 text-center">高限</th>
+                                        <th scope="col" class="px-3 py-2 text-center">低限</th>
+                                        <th scope="col" class="px-3 py-2 text-center">低低限</th>
+                                        <th scope="col" class="px-3 py-2 text-center">厂区</th>
+                                        <th scope="col" class="px-3 py-2 text-center">重大危险源</th>
+                                        <th scope="col" class="px-3 py-2 text-center">安全仪表</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="device-data-table">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div id="alarm-data" class="page-content hidden">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                        <div class="card">
+                            <div class="card-header">
+                            <span class="text-sm">总报警数</span>
+                            <i class="fa fa-exclamation-circle text-danger text-sm"></i>
+                        </div>
+                            <div class="data-value" id="total-alarms">0</div>
+                            <div class="text-sm text-gray-500 mt-2">
+                                <span class="text-danger"><i class="fa fa-arrow-up mr-1"></i>12.5%</span> 较昨日
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="text-sm">未处理报警</span>
+                                <i class="fa fa-clock-o text-warning text-sm"></i>
+                            </div>
+                            <div class="data-value" id="unprocessed-alarms">0</div>
+                            <div class="text-sm text-gray-500 mt-2">
+                                <span class="text-danger"><i class="fa fa-arrow-up mr-1"></i>8.3%</span> 较昨日
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="text-sm">已处理报警</span>
+                                <i class="fa fa-check text-success text-sm"></i>
+                            </div>
+                            <div class="data-value" id="processed-alarms">0</div>
+                            <div class="text-sm text-gray-500 mt-2">
+                                <span class="text-success"><i class="fa fa-arrow-up mr-1"></i>15.2%</span> 较昨日
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="text-sm">实时报警数据</span>
+                            <div class="flex space-x-1">
+                                <button id="alarm-subscribe-btn" onclick="toggleAlarmSubscription()" class="text-xs px-2 py-0.5 rounded bg-danger text-white hover:bg-danger/90 transition-colors">
+                                    <i class="fa fa-bell-slash mr-1 text-xs"></i> 取消订阅
+                                </button>
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-xs text-left text-gray-700 dark:text-gray-300">
+                                <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-300">
+                                    <tr>
+                                        <th scope="col" class="px-2 py-1">报警时间</th>
+                                        <th scope="col" class="px-2 py-1">设备名称</th>
+                                        <th scope="col" class="px-2 py-1">描述</th>
+                                        <th scope="col" class="px-2 py-1">报警类型</th>
+                                        <th scope="col" class="px-2 py-1">报警值</th>
+                                        <th scope="col" class="px-2 py-1">报警阈值</th>
+                                        <th scope="col" class="px-2 py-1">状态</th>
+                                        <th scope="col" class="px-2 py-1">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="alarm-data-table">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div id="history-alarm-data" class="page-content hidden">
+                    <div class="card mb-1 w-full">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-0 p-1">
+                            <div class="md:col-span-1">
+                                <label class="block text-xs font-medium text-gray-600 mb-0.25">已选设备</label>
+                                <div id="selected-alarm-devices-container" class="grid grid-cols-2 gap-1 max-h-16 border border-gray-200 rounded-lg p-1">
+                                    <!-- 已选设备标签将在这里动态添加 -->
+                                    <div class="col-span-2 text-center text-xs text-gray-400 py-2" id="no-alarm-devices-message">
+                                        无已选设备
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="block text-xs font-medium text-gray-600 mb-0.25">搜索</label>
+                                <div class="relative mb-0.5">
+                                    <div class="flex space-x-1">
+                                        <input type="text" id="alarm-device-search" placeholder="搜索设备..." autocomplete="off" class="flex-1 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent p-1">
+                                        <button onclick="searchAlarmDevices()" class="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                                            <i class="fa fa-search mr-1"></i> 搜索
+                                        </button>
+                                    </div>
+                                    <!-- 搜索结果下拉列表 -->
+                                    <div id="alarm-search-results" class="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-40 overflow-y-auto hidden">
+                                    </div>
+                                </div>
+                                <div class="space-y-1">
+                                    <div class="flex items-end gap-1 flex-wrap">
+                                        <div class="flex-1 min-w-[120px]">
+                                            <label class="block text-xs font-medium text-gray-600 mb-0.25">开始时间</label>
+                                            <input type="datetime-local" id="alarm-history-start-time" class="w-full px-1 py-0.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                        </div>
+                                        <div class="flex space-x-1">
+                                            <button onclick="resetAlarmDeviceSelection()" class="px-2 py-0.5 text-xs border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+                                                <i class="fa fa-refresh mr-1"></i> 重置
+                                            </button>
+                                            <button id="query-history-alarm-btn" onclick="queryHistoryAlarm()" class="px-2 py-0.5 text-xs bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+                                                    查询
+                                                </button>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-end gap-1 flex-wrap">
+                                        <div class="flex-1 min-w-[120px]">
+                                            <label class="block text-xs font-medium text-gray-600 mb-0.25">结束时间</label>
+                                            <input type="datetime-local" id="alarm-history-end-time" class="w-full px-1 py-0.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                        </div>
+                                        <div class="flex items-center space-x-1 flex-wrap">
+                                            <label class="block text-xs font-medium text-gray-600">报警类型</label>
+                                            <select id="alarm-type-select" class="px-2 py-0.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                                <option value="all">全部类型</option>
+                                                <option value="high">高值报警</option>
+                                                <option value="low">低值报警</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="text-sm">历史报警记录</span>
+                            <div class="flex space-x-1">
+                                <button class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors">
+                                    <i class="fa fa-download mr-1 text-xs"></i> 导出CSV
+                                </button>
+                                <button class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600 hover:bg-gray-300 transition-colors">
+                                    <i class="fa fa-print mr-1 text-xs"></i> 打印
+                                </button>
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left text-gray-700 dark:text-gray-300">
+                                <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-300">
+                                    <tr>
+                                        <th scope="col" class="px-6 py-3">报警时间</th>
+                                        <th scope="col" class="px-6 py-3">设备名称</th>
+                                        <th scope="col" class="px-6 py-3">报警类型</th>
+                                        <th scope="col" class="px-6 py-3">报警值</th>
+                                        <th scope="col" class="px-6 py-3">处理时间</th>
+                                        <th scope="col" class="px-6 py-3">处理人</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="history-alarm-data-table">
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="flex items-center justify-between mt-4 px-4">
+                            <div class="text-sm text-gray-500">
+                                显示 1 至 10 条，共 100 条
+                            </div>
+                            <div class="flex space-x-1">
+                                <button class="px-3 py-1 rounded border border-gray-300 text-gray-500 hover:bg-gray-50 disabled:opacity-50" disabled>
+                                    <i class="fa fa-chevron-left"></i>
+                                </button>
+                                <button class="px-3 py-1 rounded border border-primary bg-primary text-white">1</button>
+                                <button class="px-3 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50">2</button>
+                                <button class="px-3 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50">3</button>
+                                <button class="px-3 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50">...</button>
+                                <button class="px-3 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50">10</button>
+                                <button class="px-3 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50">
+                                    <i class="fa fa-chevron-right"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="history-data" class="page-content hidden">
+                    <div class="card mb-1 w-full">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-0 p-1">
+                            <div class="md:col-span-1">
+                                <label class="block text-xs font-medium text-gray-600 mb-0.25">已选设备</label>
+                                <div id="selected-devices-container" class="grid grid-cols-2 gap-1 max-h-16 border border-gray-200 rounded-lg p-1">
+                                    <!-- 已选设备标签将在这里动态添加 -->
+                                    <div class="col-span-2 text-center text-xs text-gray-400 py-2" id="no-devices-message">
+                                        无已选设备
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="block text-xs font-medium text-gray-600 mb-0.25">搜索</label>
+                                <div class="relative mb-0.5">
+                                    <div class="flex space-x-1">
+                                        <input type="text" id="device-search" placeholder="搜索位号..." autocomplete="off" class="flex-1 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent p-1">
+                                        <button onclick="searchDevices()" class="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                                            <i class="fa fa-search mr-1"></i> 搜索
+                                        </button>
+                                    </div>
+                                    <!-- 搜索结果下拉列表 -->
+                                    <div id="search-results" class="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-40 overflow-y-auto hidden">
+                                    </div>
+                                </div>
+                                <div class="space-y-1">
+                                    <div class="flex items-end gap-1 flex-wrap">
+                                        <div class="flex-1 min-w-[120px]">
+                                            <label class="block text-xs font-medium text-gray-600 mb-0.25">开始时间</label>
+                                            <input type="datetime-local" id="history-start-time" class="w-full px-1 py-0.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                        </div>
+                                        <div class="flex space-x-1">
+                                              <button onclick="window.resetDeviceSelection()" class="px-2 py-0.5 text-xs border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+                                                  <i class="fa fa-refresh mr-1"></i> 重置
+                                              </button>
+                                              <button onclick="window.simpleQuery()" class="px-2 py-0.5 text-xs bg-primary text-white rounded-lg hover:bg-gray-50 transition-colors">
+                                                  查询
+                                              </button>
+                                          </div>
+                                    </div>
+                                    <div class="flex items-end gap-1 flex-wrap">
+                                        <div class="flex-1 min-w-[120px]">
+                                            <label class="block text-xs font-medium text-gray-600 mb-0.25">结束时间</label>
+                                            <input type="datetime-local" id="history-end-time" class="w-full px-1 py-0.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                        </div>
+                                        <div class="flex items-center space-x-1 flex-wrap">
+                                            <label class="block text-xs font-medium text-gray-600">显示方式</label>
+                                              <button onclick="window.switchDisplayMode('chart')" id="chart-mode-btn" class="px-2 py-0.5 text-xs bg-primary text-white rounded-lg hover:bg-gray-50 transition-colors">
+                                                  趋势图
+                                              </button>
+                                              <button onclick="window.switchDisplayMode('table')" id="table-mode-btn" class="px-2 py-0.5 text-xs border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+                                                   表格
+                                               </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="chart-display" class="card w-full" style="height: calc(100vh - 230px);">
+                        <div class="p-0 h-full">
+                            <div id="history-chart" class="w-full h-full"></div>
+                        </div>
+                    </div>
+                    <div id="table-display" class="card w-full" style="height: calc(100vh - 230px); display: none;">
+                        <div class="p-0 h-full overflow-x-auto overflow-y-auto">
+                            <!-- 表格内容将由JavaScript动态生成 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 用户管理页面 start -->
+                <div id="admin-user" class="page-content hidden">
+                    <div class="mb-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-2xl font-bold text-gray-800">用户管理</h2>
+                            <div class="flex space-x-3">
+                                <button id="import-user-btn" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all">
+                                    <i class="fa fa-upload mr-1"></i> 导入用户
+                                </button>
+                                <button id="add-user-btn" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-all">
+                                    <i class="fa fa-plus mr-1"></i> 新增用户
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="w-full table-auto">
+                                    <thead>
+                                        <tr class="bg-gray-50">
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">用户名</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">真实姓名</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">厂区权限</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">区域等级</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创建时间</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="user-list-body" class="bg-white divide-y divide-gray-200">
+                                        <!-- 用户数据将通过JS动态填充 -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- 用户管理页面 end -->
+
+                <!-- 设备管理页面 start -->
+                <div id="admin-device" class="page-content hidden">
+                    <div class="mb-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-2xl font-bold text-gray-800">设备管理</h2>
+                            <button id="refresh-device-btn" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-all">
+                                <i class="fa fa-refresh mr-1"></i> 刷新列表
+                            </button>
+                        </div>
+                        <div class="card overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="w-full table-auto">
+                                    <thead>
+                                        <tr class="bg-gray-50">
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">设备位号</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">设备名称</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">所属厂区</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">单位</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">报警上限</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">报警下限</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">描述</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="device-list-body" class="bg-white divide-y divide-gray-200">
+                                        <!-- 设备数据将通过JS动态填充 -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- 设备管理页面 end -->
+
+                <!-- 资料中心页面 start -->
+                <div id="db-laws" class="page-content hidden">
+                    <div class="mb-6">
+                        <div class="card mb-4">
+                            <div class="p-4">
+                                <div class="relative">
+                                    <div class="flex space-x-2">
+                                        <input type="text" id="law-search" placeholder="搜索法规名称或发布文号..." autocomplete="off" class="flex-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent p-2">
+                                        <button onclick="queryLaw()" class="px-4 py-2 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                                            <i class="fa fa-search mr-1"></i> 查询
+                                        </button>
+                                    </div>
+                                    <!-- 搜索下拉列表 -->
+                                    <div id="law-search-results" class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto hidden">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="p-4">
+                                <div id="law-list-container">
+                                    <div class="text-center py-12" id="no-laws-message">
+                                        <i class="fa fa-gavel text-4xl text-gray-400 mb-4"></i>
+                                        <p class="text-gray-500">无相关数据</p>
+                                    </div>
+                                    <table id="law-list" class="w-full text-sm text-left text-gray-700 hidden">
+                                        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                            <tr>
+                                                <th scope="col" class="px-6 py-3">法规名称</th>
+                                                <th scope="col" class="px-6 py-3">法律类型</th>
+                                                <th scope="col" class="px-6 py-3">发布文号</th>
+                                                <th scope="col" class="px-6 py-3">施行日期</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="db-standards" class="page-content hidden">
+                    <div class="mb-6">
+                        <div class="card mb-4">
+                            <div class="p-4">
+                                <div class="relative">
+                                    <div class="flex space-x-2">
+                                        <input type="text" id="standard-search" placeholder="搜索标准名称或编号..." autocomplete="off" class="flex-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent p-2">
+                                        <button onclick="queryStandard()" class="px-4 py-2 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                                            <i class="fa fa-search mr-1"></i> 查询
+                                        </button>
+                                    </div>
+                                    <!-- 搜索下拉列表 -->
+                                    <div id="standard-search-results" class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto hidden">
+                                    </div>
+                                </div>
+                                <!-- 分类卡片 -->
+                                <div class="flex flex-wrap gap-2 mt-3">
+                                    <button onclick="filterStandards('all')" class="px-3 py-1 text-xs bg-primary text-white rounded-full hover:bg-primary/90 transition-colors">
+                                        全部
+                                    </button>
+                                    <button onclick="filterStandards('gb')" class="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors">
+                                        国标
+                                    </button>
+                                    <button onclick="filterStandards('industry')" class="px-3 py-1 text-xs bg-green-100 text-green-700 rounded-full hover:bg-green-200 transition-colors">
+                                        行标
+                                    </button>
+                                    <button onclick="filterStandards('international')" class="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 transition-colors">
+                                        国际
+                                    </button>
+                                    <button onclick="filterStandards('other')" class="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 transition-colors">
+                                        其他
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="p-4">
+                                <div id="standard-list-container">
+                                    <div class="text-center py-12" id="no-standards-message">
+                                        <i class="fa fa-book text-4xl text-gray-400 mb-4"></i>
+                                        <p class="text-gray-500">无相关数据</p>
+                                    </div>
+                                    <table id="standard-list" class="w-full text-sm text-left text-gray-700 hidden">
+                                        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                            <tr>
+                                                <th scope="col" class="px-6 py-3">标准名称</th>
+                                                <th scope="col" class="px-6 py-3">标准类型</th>
+                                                <th scope="col" class="px-6 py-3">标准编号</th>
+                                                <th scope="col" class="px-6 py-3">发布日期</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="db-rules" class="page-content hidden">
+                    <div class="mb-6">
+                        <div class="card mb-4">
+                            <div class="p-4">
+                                <div class="relative">
+                                    <div class="flex space-x-2">
+                                        <input type="text" id="rule-search" placeholder="搜索制度名称或编号..." autocomplete="off" class="flex-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent p-2">
+                                        <button onclick="queryRule()" class="px-4 py-2 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                                            <i class="fa fa-search mr-1"></i> 查询
+                                        </button>
+                                    </div>
+                                    <!-- 搜索下拉列表 -->
+                                    <div id="rule-search-results" class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto hidden">
+                                    </div>
+                                </div>
+                                <!-- 分类卡片 -->
+                                <div class="flex flex-wrap gap-2 mt-3">
+                                    <button onclick="filterRules('all')" class="px-3 py-1 text-xs bg-primary text-white rounded-full hover:bg-primary/90 transition-colors">
+                                        全部
+                                    </button>
+                                    <button onclick="filterRules('safety')" class="px-3 py-1 text-xs bg-red-100 text-red-700 rounded-full hover:bg-red-200 transition-colors">
+                                        安全管理
+                                    </button>
+                                    <button onclick="filterRules('production')" class="px-3 py-1 text-xs bg-orange-100 text-orange-700 rounded-full hover:bg-orange-200 transition-colors">
+                                        生产管理
+                                    </button>
+                                    <button onclick="filterRules('equipment')" class="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors">
+                                        设备管理
+                                    </button>
+                                    <button onclick="filterRules('quality')" class="px-3 py-1 text-xs bg-green-100 text-green-700 rounded-full hover:bg-green-200 transition-colors">
+                                        质量管理
+                                    </button>
+                                    <button onclick="filterRules('other')" class="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 transition-colors">
+                                        其他
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="p-4">
+                                <div id="rule-list-container">
+                                    <div class="text-center py-12" id="no-rules-message">
+                                        <i class="fa fa-file-text text-4xl text-gray-400 mb-4"></i>
+                                        <p class="text-gray-500">无相关数据</p>
+                                    </div>
+                                    <table id="rule-list" class="w-full text-sm text-left text-gray-700 hidden">
+                                        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                            <tr>
+                                                <th scope="col" class="px-6 py-3">制度名称</th>
+                                                <th scope="col" class="px-6 py-3">制度类型</th>
+                                                <th scope="col" class="px-6 py-3">发布文号</th>
+                                                <th scope="col" class="px-6 py-3">发布日期</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="db-drawings" class="page-content hidden">
+                    <div class="mb-6">
+                        <div class="card">
+                            <div class="p-6">
+                                <div class="text-center py-12">
+                                    <i class="fa fa-paint-brush text-4xl text-gray-400 mb-4"></i>
+                                    <p class="text-gray-500">图纸中心内容将在此显示</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="db-maintain" class="page-content hidden">
+                    <div class="mb-6">
+                        <div class="card">
+                            <div class="p-6">
+                                <div class="text-center py-12">
+                                    <i class="fa fa-graduation-cap text-4xl text-gray-400 mb-4"></i>
+                                    <p class="text-gray-500">学习中心内容将在此显示</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- 资料中心页面 end -->
+
+                <!-- 化工行业工具页面 start -->
+                <div id="chem-tools" class="page-content hidden">
+                    <div class="mb-6">
+                        <h2 class="text-2xl font-bold text-gray-800">化工行业工具</h2>
+                        <div class="card">
+                            <div class="p-6">
+                                <div class="text-center py-12">
+                                    <i class="fa fa-flask text-4xl text-gray-400 mb-4"></i>
+                                    <p class="text-gray-500">化工行业工具内容将在此显示</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- 化工行业工具页面 end -->
+            </main>
+        </div>
+    </div>
+
+    
+    <!-- JavaScript文件 -->
+    <script src="src/js/config.js?v=20260222"></script>
+    <script src="src/js/login.js?v=20260222"></script>
+    <script src="src/js/mqtt.js?v=20260222"></script>
+    <script src="src/js/device-data.js?v=20260222"></script>
+    <script src="src/js/alarm-data.js?v=20260222"></script>
+    <script src="src/js/charts.js?v=20260222"></script>
+    <script src="src/js/main.js?v=20260222"></script>
+    <!-- 历史数据功能完全重构，所有代码直接写在页面 -->
+    <script>
+        // 全局变量
+        window.selectedDevices = new Map();
+        window.historyData = [];
+        window.historyChart = null;
+        window.selectedSeriesName = null;
+        
+        // 7. 处理历史数据返回
+        window.processHistoryData = function(message) {
+            console.log('收到历史数据返回:', message);
+            try {
+                const mqttData = message.data || message;
+                
+                // 检查是否是SCADA系统返回的历史数据格式
+                if (mqttData.method === 'HistoryData') {
+                    // 这里应该是SCADA系统返回的历史数据
+                    console.log('SCADA历史数据格式:', mqttData);
+                    
+                    // 检查是否包含result.data（标准格式）
+                    if (mqttData.result && mqttData.result.data) {
+                        const historyData = mqttData.result.data;
+                        window.historyData = historyData;
+                        // 渲染图表和表格
+                        window.updateHistoryChart(historyData);
+                        window.updateHistoryTable(historyData);
+                        // 自动切换到图表视图
+                        window.switchDisplayMode('chart');
+                        console.log('历史数据渲染完成，共', historyData.length, '个设备');
+                    } else {
+                        // 这是查询请求格式，不是历史数据返回
+                        console.log('这是历史数据查询请求，不是返回数据');
+                        alert('这是历史数据查询请求，不是返回数据');
+                    }
+                } else {
+                    console.error('历史数据格式错误:', message);
+                    alert('历史数据格式错误，请检查返回内容');
+                }
+            } catch (error) {
+                console.error('处理历史数据失败:', error);
+                alert('处理历史数据失败');
+            }
+        }
+        
+        // 8. 更新趋势图（纯echarts实现）
+        window.updateHistoryChart = function(data) {
+            console.log('更新趋势图:', data);
+            if (!data || !Array.isArray(data) || data.length === 0) {
+                console.log('无数据可显示');
+                return;
+            }
+            
+            const chartDom = document.getElementById('history-chart');
+            if (!chartDom) return;
+            
+            // 复用已有实例，不要销毁，避免事件残留错误
+            if (!window.historyChart) {
+                window.historyChart = echarts.init(chartDom);
+            }
+            
+            // 收集所有时间点
+            const allTimes = new Set();
+            data.forEach(device => {
+                if (device.datalist && Array.isArray(device.datalist)) {
+                    device.datalist.forEach(p => allTimes.add(p.time));
+                }
+            });
+            const sortedTimes = Array.from(allTimes).sort((a, b) => a - b);
+            const xAxisData = sortedTimes.map(t => new Date(t).toLocaleTimeString());
+            
+            // 处理系列数据和多Y轴配置
+            const series = [];
+            const yAxis = [];
+            const colors = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4'];
+            
+            data.forEach((device, index) => {
+                if (!device.name || !device.datalist) return;
+                
+                // 获取设备的量程范围
+                const deviceInfo = window.deviceData ? window.deviceData[device.name] : null;
+                const minRange = deviceInfo?.minRange || 0;
+                const maxRange = deviceInfo?.maxRange || 100;
+                const deviceRange = maxRange - minRange;
+                
+                // 归一化函数：将实际值转换为0-100的百分比
+                const normalize = (value) => {
+                    if (deviceRange === 0) return 50; // 避免除以0
+                    return ((value - minRange) / deviceRange) * 100;
+                };
+                
+                // 反归一化函数：将0-100的百分比转换为实际值
+                const denormalize = (percent) => {
+                    return (percent / 100) * deviceRange + minRange;
+                };
+                
+                // 为每个设备创建独立Y轴（全部隐藏，只保留一个共用的Y轴显示）
+                yAxis.push({
+                    type: 'value',
+                    min: 0,
+                    max: 100,
+                    interval: 25, // 强制间隔为25，确保刻度为0, 25, 50, 75, 100
+                    show: index === 0, // 只显示第一个Y轴，其他隐藏
+                    position: 'left',
+                    offset: 0,
+                    axisLine: { show: index === 0 },
+                    axisTick: {
+                        show: index === 0,
+                        interval: 25, // 强制间隔为25
+                        alignWithLabel: true
+                    },
+                    axisLabel: { 
+                        show: index === 0,
+                        formatter: function(value) {
+                            // Y轴刻度：显示原始的高度百分比值
+                            return value + '%';
+                        }
+                    },
+                    splitNumber: 4, // 4个分割线，5个刻度
+                    splitLine: { show: index === 0 }
+                });
+                
+                // 映射数据并归一化
+                const valueMap = new Map();
+                device.datalist.forEach(p => valueMap.set(p.time, p.val));
+                const seriesData = sortedTimes.map(t => {
+                    const val = valueMap.get(t);
+                    return val !== null && val !== undefined ? normalize(val) : null;
+                });
+                
+                // 检查是否选中
+                const isSelected = window.selectedSeriesName === device.name;
+                
+                series.push({
+                    name: device.name,
+                    type: 'line',
+                    data: seriesData,
+                    smooth: true,
+                    color: colors[index % colors.length],
+                    yAxisIndex: index, // 每个系列对应自己的Y轴
+                    lineStyle: {
+                        width: isSelected ? 4 : 1, // 默认线条更细，选中时加粗更明显
+                        opacity: isSelected ? 1 : 0.6 // 未选中的线条更透明，选中的更突出
+                    },
+                    itemStyle: {
+                        opacity: isSelected ? 1 : 0.6
+                    },
+                    // 自定义Tooltip格式化，显示原始值
+                    tooltip: {
+                        formatter: function(params) {
+                            const originalValue = valueMap.get(sortedTimes[params.dataIndex]);
+                            const unit = window.selectedDevices ? window.selectedDevices.get(device.name)?.unit || 'kPa' : 'kPa';
+                            return `${params.axisValue}<br/>${device.name}: ${originalValue.toFixed(2)} ${unit}`;
+                        }
+                    }
+                });
+            });
+            
+            // 图表配置
+            const option = {
+                tooltip: { 
+                    trigger: 'axis',
+                    formatter: function(params) {
+                        let html = params[0].axisValue + '<br/>';
+                        params.forEach(item => {
+                            // 找到原始数据
+                            const deviceIndex = data.findIndex(d => d.name === item.seriesName);
+                            if (deviceIndex !== -1) {
+                                const device = data[deviceIndex];
+                                const valueMap = new Map();
+                                device.datalist.forEach(p => valueMap.set(p.time, p.val));
+                                const originalValue = valueMap.get(sortedTimes[item.dataIndex]);
+                                const unit = window.selectedDevices ? window.selectedDevices.get(device.name)?.unit || 'kPa' : 'kPa';
+                                html += `<span style="color:${item.color}">● ${device.name}: ${originalValue.toFixed(2)} ${unit}</span><br/>`;
+                            }
+                        });
+                        return html;
+                    }
+                },
+                legend: { top: 10, left: 'center' },
+                grid: {
+                    left: 30,
+                    right: 10,
+                    top: 40,
+                    bottom: 20,
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    data: xAxisData
+                },
+                yAxis: yAxis, // 多Y轴配置
+                series: series
+            };
+            
+            // 先移除之前的事件绑定，避免重复绑定
+            window.historyChart.off('legendselectchanged');
+            
+            // 设置配置
+            window.historyChart.setOption(option, true); // 第二个参数true表示完全替换旧配置
+            
+            // 绑定图例点击事件（只绑定一次）
+            window.historyChart.on('legendselectchanged', (params) => {
+                // 阻止ECharts默认隐藏/显示系列的行为，强制所有系列都显示
+                const allSelected = {};
+                data.forEach(device => {
+                    if (device.name) allSelected[device.name] = true;
+                });
+                window.historyChart.setOption({
+                    legend: { selected: allSelected }
+                });
+
+                // 处理选中逻辑：获取点击的位号，选中的线条加粗
+                const clickedName = params.name; // 直接获取点击的图例名称
+                window.selectedSeriesName = clickedName;
+                window.updateHistoryChart(data);
+            });
+            
+            // 自适应大小
+            setTimeout(() => window.historyChart.resize(), 200);
+            // 只绑定一次resize事件
+            if (!window._historyChartResizeBound) {
+                window.addEventListener('resize', () => window.historyChart?.resize());
+                window._historyChartResizeBound = true;
+            }
+        }
+        
+        // 9. 更新表格
+        window.updateHistoryTable = function(data) {
+            const tableContainer = document.querySelector('#table-display > div');
+            if (!tableContainer) return;
+            
+            if (!data || !Array.isArray(data) || data.length === 0) {
+                tableContainer.innerHTML = '<div class="text-center text-gray-500 py-16">暂无数据</div>';
+                return;
+            }
+            
+            // 收集所有时间点
+            const allTimes = new Set();
+            data.forEach(device => {
+                if (device.datalist) device.datalist.forEach(p => allTimes.add(p.time));
+            });
+            const sortedTimes = Array.from(allTimes).sort((a, b) => a - b);
+            
+            // 生成表格
+            let html = `
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr class="bg-gray-50">
+                            <th class="border px-2 py-1">时间</th>
+            `;
+            data.forEach(device => {
+                // 从全局Map取对应设备的单位
+                const unit = window.selectedDevices.get(device.name)?.unit || '';
+                html += `<th class="border px-2 py-1">${device.name}${unit ? ' (' + unit + ')' : ''}</th>`;
+            });
+            html += `
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            sortedTimes.forEach(time => {
+                html += `<tr><td class="border px-2 py-1">${new Date(time).toLocaleString()}</td>`;
+                data.forEach(device => {
+                    const point = device.datalist.find(p => p.time === time);
+                    html += `<td class="border px-2 py-1">${point ? (typeof point.val === 'number' ? point.val.toFixed(2) : point.val) : '-'}</td>`;
+                });
+                html += `</tr>`;
+            });
+            html += `</tbody></table>`;
+            // 表格容器设置滚动和相对定位（冻结效果必须）
+            tableContainer.style.maxHeight = 'calc(100vh - 280px)';
+            tableContainer.style.overflow = 'auto';
+            tableContainer.style.position = 'relative';
+            
+            // 强制添加冻结首行的CSS，优先级最高
+            const freezeStyle = document.createElement('style');
+            freezeStyle.textContent = `
+                #table-display table thead tr {
+                    position: sticky !important;
+                    top: 0 !important;
+                    z-index: 9999 !important;
+                    background-color: #f3f4f6 !important;
+                }
+                #table-display table thead tr th:first-child {
+                    position: sticky !important;
+                    left: 0 !important;
+                    z-index: 10000 !important;
+                    background-color: #e5e7eb !important;
+                }
+                #table-display table tbody tr td:first-child {
+                    position: sticky !important;
+                    left: 0 !important;
+                    z-index: 9998 !important;
+                    background-color: white !important;
+                }
+            `;
+            document.head.appendChild(freezeStyle);
+            
+            // 替换表头和时间列的样式，强制固定
+            html = html.replace('<th class="w-28 px-2 py-1.5 border border-gray-200 text-left font-medium">时间</th>', 
+                              '<th class="w-28 px-2 py-1.5 border border-gray-200 text-left font-medium sticky top-0 left-0 z-20 bg-gray-50" style="position: sticky; top: 0; left: 0; z-index: 20; background: #f9fafb;">时间</th>');
+            
+            html = html.replace(/<th class="px-2 py-1.5 border border-gray-200 text-left font-medium">/g, 
+                              '<th class="px-2 py-1.5 border border-gray-200 text-left font-medium sticky top-0 z-10 bg-gray-50" style="position: sticky; top: 0; z-index: 10; background: #f9fafb;">');
+            
+            html = html.replace(/<td class="px-2 py-1 border border-gray-200" style="position: sticky; left: 0; background: white; z-index: 10;">/g, '<td class="px-2 py-1 border border-gray-200 sticky left-0 z-10 bg-white" style="position: sticky; left: 0; z-index: 10; background: white;">');
+            
+            tableContainer.innerHTML = html;
+        }
+        
+
+        
+        // 回车搜索
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('device-search')?.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') window.searchDevices();
+            });
+            
+            // 法律法规搜索回车事件
+            document.getElementById('law-search')?.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') searchLaws();
+            });
+        });
+        
+        // 搜索防抖计时器
+        let searchTimeout = null;
+        // 选中的法规数据
+        let selectedLaw = null;
+
+        // 法律法规搜索函数（显示下拉列表）
+        async function searchLaws() {
+            const searchInput = document.getElementById('law-search');
+            const keyword = searchInput ? searchInput.value.trim() : '';
+            const resultsContainer = document.getElementById('law-search-results');
+            
+            // 最小搜索长度限制：至少2个汉字
+            if (keyword.length < 2 && keyword.length > 0) {
+                resultsContainer.classList.add('hidden');
+                return; // 不足2个汉字不搜索
+            }
+            
+            if (keyword.length === 0) {
+                resultsContainer.classList.add('hidden');
+                return;
+            }
+            
+            try {
+                // 调用API获取数据
+                const response = await fetch(`${API_BASE_URL}/laws/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({ keyword })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('网络请求失败');
+                }
+                
+                const data = await response.json();
+                const laws = data.success ? data.data : [];
+                
+                // 显示下拉列表
+                if (laws.length > 0) {
+                    renderSearchResults(laws);
+                } else {
+                    resultsContainer.classList.add('hidden');
+                }
+            } catch (error) {
+                console.error('搜索法规失败:', error);
+                resultsContainer.classList.add('hidden');
+            }
+        }
+
+        // 渲染搜索下拉列表
+        function renderSearchResults(laws) {
+            const resultsContainer = document.getElementById('law-search-results');
+            if (!resultsContainer) return;
+            
+            // 清空之前的结果
+            resultsContainer.innerHTML = '';
+            
+            // 添加搜索结果
+            laws.forEach(law => {
+                const resultItem = document.createElement('div');
+                resultItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer';
+                resultItem.innerHTML = `
+                    <div class="font-medium">${law.law_title}</div>
+                    <div class="text-xs text-gray-500">${law.law_type} | ${law.issuing_no} | ${law.implement_date}</div>
+                `;
+                
+                // 添加点击事件
+                resultItem.addEventListener('click', () => {
+                    selectLaw(law);
+                });
+                
+                resultsContainer.appendChild(resultItem);
+            });
+            
+            // 显示下拉列表
+            resultsContainer.classList.remove('hidden');
+        }
+
+        // 选择法规
+        function selectLaw(law) {
+            const searchInput = document.getElementById('law-search');
+            const resultsContainer = document.getElementById('law-search-results');
+            
+            if (searchInput) {
+                searchInput.value = law.law_title;
+            }
+            
+            // 存储选中的法规
+            selectedLaw = law;
+            
+            // 隐藏下拉列表
+            resultsContainer.classList.add('hidden');
+        }
+
+        // 查询法规（打开PDF）
+        function queryLaw() {
+            if (selectedLaw) {
+                openLawPDF(selectedLaw);
+            } else {
+                // 如果没有选择，提示用户
+                alert('请先搜索并选择一个法规');
+            }
+        }
+
+        // 搜索输入防抖处理
+        document.addEventListener('DOMContentLoaded', () => {
+            const searchInput = document.getElementById('law-search');
+            if (searchInput) {
+                searchInput.addEventListener('input', function() {
+                    // 清除之前的定时器
+                    if (searchTimeout) {
+                        clearTimeout(searchTimeout);
+                    }
+                    
+                    // 设置新的定时器
+                    searchTimeout = setTimeout(() => {
+                        const keyword = this.value.trim();
+                        // 只有输入至少2个汉字才搜索
+                        if (keyword.length >= 2) {
+                            searchLaws();
+                        } else {
+                            // 清空搜索框时隐藏下拉列表
+                            const resultsContainer = document.getElementById('law-search-results');
+                            if (resultsContainer) {
+                                resultsContainer.classList.add('hidden');
+                            }
+                            selectedLaw = null;
+                        }
+                    }, 300); // 300ms防抖延迟
+                });
+                
+                // 点击页面其他地方隐藏下拉列表
+                document.addEventListener('click', function(e) {
+                    const searchContainer = document.querySelector('.relative');
+                    const resultsContainer = document.getElementById('law-search-results');
+                    
+                    if (searchContainer && resultsContainer && !searchContainer.contains(e.target)) {
+                        resultsContainer.classList.add('hidden');
+                    }
+                });
+            }
+        });
+        
+        // 加载完整法规列表
+        async function loadLawList() {
+            const container = document.getElementById('law-list-container');
+            
+            if (container) {
+                container.innerHTML = '<div class="text-center py-12"><i class="fa fa-spinner fa-spin text-4xl text-gray-400 mb-4"></i><p class="text-gray-500">加载中...</p></div>';
+            }
+            
+            try {
+                // 调用API获取完整法规列表
+                const response = await fetch(`${API_BASE_URL}/laws/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({ keyword: '' }) // 空关键词获取完整列表
+                });
+                
+                if (!response.ok) {
+                    throw new Error('网络请求失败');
+                }
+                
+                const data = await response.json();
+                const laws = data.success ? data.data : [];
+                
+                // 渲染法规列表
+                renderLawList(laws);
+            } catch (error) {
+                console.error('加载法规列表失败:', error);
+                
+                if (container) {
+                    container.innerHTML = '<div class="text-center py-12"><i class="fa fa-exclamation-circle text-4xl text-red-400 mb-4"></i><p class="text-red-500">加载失败，请稍后重试</p></div>';
+                }
+            }
+        }
+
+        // 渲染法规列表
+        function renderLawList(laws) {
+            const container = document.getElementById('law-list-container');
+            
+            if (!container) return;
+            
+            if (laws.length === 0) {
+                // 显示无数据信息
+                container.innerHTML = '<div class="text-center py-12"><i class="fa fa-gavel text-4xl text-gray-400 mb-4"></i><p class="text-gray-500">无相关数据</p></div>';
+            } else {
+                // 创建表格结构
+                const tableHTML = `
+                    <table id="law-list" class="w-full text-sm text-left text-gray-700">
+                        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3">法规名称</th>
+                                <th scope="col" class="px-6 py-3">法律类型</th>
+                                <th scope="col" class="px-6 py-3">发布文号</th>
+                                <th scope="col" class="px-6 py-3">施行日期</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${laws.map(law => `
+                                <tr class="hover:bg-gray-50 cursor-pointer" data-law='${JSON.stringify(law)}'>
+                                    <td class="px-6 py-4">${law.law_title}</td>
+                                    <td class="px-6 py-4">${law.law_type}</td>
+                                    <td class="px-6 py-4">${law.issuing_no}</td>
+                                    <td class="px-6 py-4">${law.implement_date}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                
+                // 更新容器内容
+                container.innerHTML = tableHTML;
+                
+                // 添加点击事件监听器
+                const rows = container.querySelectorAll('tr[data-law]');
+                rows.forEach(row => {
+                    row.addEventListener('click', () => {
+                        const lawData = JSON.parse(row.dataset.law);
+                        openLawPDF(lawData);
+                    });
+                });
+            }
+        }
+
+        // 页面加载时加载法规列表
+        document.addEventListener('DOMContentLoaded', function() {
+            // 检查当前是否在法律法规页面
+            const lawsPage = document.getElementById('db-laws');
+            if (lawsPage && !lawsPage.classList.contains('hidden')) {
+                loadLawList();
+            }
+            
+            // 监听菜单点击，当切换到法律法规页面时加载列表
+            document.querySelectorAll('.menu-item[data-target="db-laws"]').forEach(item => {
+                item.addEventListener('click', function() {
+                    // 延迟加载，确保页面已显示
+                    setTimeout(loadLawList, 100);
+                });
+            });
+            
+            // 检查当前是否在标准规范页面
+            const standardsPage = document.getElementById('db-standards');
+            if (standardsPage && !standardsPage.classList.contains('hidden')) {
+                loadStandardList();
+            }
+            
+            // 监听菜单点击，当切换到标准规范页面时加载列表
+            document.querySelectorAll('.menu-item[data-target="db-standards"]').forEach(item => {
+                item.addEventListener('click', function() {
+                    // 延迟加载，确保页面已显示
+                    setTimeout(loadStandardList, 100);
+                });
+            });
+            
+            // 标准规范搜索回车事件
+            document.getElementById('standard-search')?.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') searchStandards();
+            });
+            
+            // 企业制度搜索回车事件
+            document.getElementById('rule-search')?.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') searchRules();
+            });
+        });
+        
+        // 标准规范搜索防抖计时器
+        let standardSearchTimeout = null;
+        // 选中的标准数据
+        let selectedStandard = null;
+        // 原始标准列表（用于筛选）
+        let originalStandards = [];
+
+        // 标准规范搜索函数（显示下拉列表）
+        async function searchStandards() {
+            const searchInput = document.getElementById('standard-search');
+            const keyword = searchInput ? searchInput.value.trim() : '';
+            const resultsContainer = document.getElementById('standard-search-results');
+            
+            // 最小搜索长度限制：至少2个汉字
+            if (keyword.length < 2 && keyword.length > 0) {
+                resultsContainer.classList.add('hidden');
+                return; // 不足2个汉字不搜索
+            }
+            
+            if (keyword.length === 0) {
+                resultsContainer.classList.add('hidden');
+                return;
+            }
+            
+            try {
+                // 调用API获取数据
+                const response = await fetch(`${API_BASE_URL}/standards/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({ keyword })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('网络请求失败');
+                }
+                
+                const data = await response.json();
+                const standards = data.success ? data.data : [];
+                
+                // 显示下拉列表
+                if (standards.length > 0) {
+                    renderStandardSearchResults(standards);
+                } else {
+                    resultsContainer.classList.add('hidden');
+                }
+            } catch (error) {
+                console.error('搜索标准失败:', error);
+                resultsContainer.classList.add('hidden');
+            }
+        }
+
+        // 渲染标准搜索下拉列表
+        function renderStandardSearchResults(standards) {
+            const resultsContainer = document.getElementById('standard-search-results');
+            if (!resultsContainer) return;
+            
+            // 清空之前的结果
+            resultsContainer.innerHTML = '';
+            
+            // 添加搜索结果
+                standards.forEach(standard => {
+                    const resultItem = document.createElement('div');
+                    resultItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer';
+                    resultItem.innerHTML = `
+                        <div class="font-medium">${standard.doc_title}</div>
+                        <div class="text-xs text-gray-500">${standard.doc_type} | ${standard.issuing_no} | ${standard.release_date}</div>
+                    `;
+                    
+                    // 添加点击事件
+                    resultItem.addEventListener('click', () => {
+                        selectStandard(standard);
+                    });
+                    
+                    resultsContainer.appendChild(resultItem);
+                });
+            
+            // 显示下拉列表
+            resultsContainer.classList.remove('hidden');
+        }
+
+        // 选择标准
+        function selectStandard(standard) {
+            const searchInput = document.getElementById('standard-search');
+            const resultsContainer = document.getElementById('standard-search-results');
+            
+            if (searchInput) {
+                searchInput.value = standard.doc_title;
+            }
+            
+            // 存储选中的标准
+            selectedStandard = standard;
+            
+            // 隐藏下拉列表
+            resultsContainer.classList.add('hidden');
+        }
+
+        // 查询标准（打开PDF）
+        function queryStandard() {
+            if (selectedStandard) {
+                openStandardPDF(selectedStandard);
+            } else {
+                // 如果没有选择，提示用户
+                alert('请先搜索并选择一个标准');
+            }
+        }
+
+        // 加载完整标准列表
+        async function loadStandardList() {
+            const container = document.getElementById('standard-list-container');
+            
+            if (container) {
+                container.innerHTML = '<div class="text-center py-12"><i class="fa fa-spinner fa-spin text-4xl text-gray-400 mb-4"></i><p class="text-gray-500">加载中...</p></div>';
+            }
+            
+            try {
+                // 调用API获取完整标准列表
+                const response = await fetch(`${API_BASE_URL}/standards/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({ keyword: '' }) // 空关键词获取完整列表
+                });
+                
+                if (!response.ok) {
+                    throw new Error('网络请求失败');
+                }
+                
+                const data = await response.json();
+                const standards = data.success ? data.data : [];
+                
+                // 保存原始列表
+                originalStandards = standards;
+                
+                // 按标准编号的字母顺序排序
+                standards.sort((a, b) => {
+                    const issuingNoA = a.issuing_no || '';
+                    const issuingNoB = b.issuing_no || '';
+                    return issuingNoA.localeCompare(issuingNoB);
+                });
+                
+                // 渲染标准列表
+                renderStandardList(standards);
+            } catch (error) {
+                console.error('加载标准列表失败:', error);
+                
+                if (container) {
+                    container.innerHTML = '<div class="text-center py-12"><i class="fa fa-exclamation-circle text-4xl text-red-400 mb-4"></i><p class="text-red-500">加载失败，请稍后重试</p></div>';
+                }
+            }
+        }
+        
+        // 筛选标准
+        function filterStandards(filterType) {
+            if (originalStandards.length === 0) {
+                // 如果原始列表为空，先加载
+                loadStandardList();
+                return;
+            }
+            
+            let filteredStandards = originalStandards;
+            
+            switch (filterType) {
+                case 'gb':
+                    // 国标：包括GB、GBT、JJF、JJG等国家级标准
+                    filteredStandards = originalStandards.filter(standard => {
+                        const issuingNo = standard.issuing_no || '';
+                        return issuingNo.startsWith('GB') || issuingNo.startsWith('JJF') || issuingNo.startsWith('JJG');
+                    });
+                    break;
+                case 'industry':
+                    // 行标：包括SH、HG、AQ等行业标准
+                    filteredStandards = originalStandards.filter(standard => {
+                        const issuingNo = standard.issuing_no || '';
+                        return issuingNo.startsWith('SH') || issuingNo.startsWith('HG') || issuingNo.startsWith('AQ');
+                    });
+                    break;
+                case 'international':
+                    // 国际标准：包括ISO、IEC等
+                    filteredStandards = originalStandards.filter(standard => {
+                        const issuingNo = standard.issuing_no || '';
+                        return issuingNo.startsWith('ISO') || issuingNo.startsWith('IEC');
+                    });
+                    break;
+                case 'other':
+                    // 其他标准：不属于以上分类的
+                    filteredStandards = originalStandards.filter(standard => {
+                        const issuingNo = standard.issuing_no || '';
+                        return !issuingNo.startsWith('GB') && !issuingNo.startsWith('JJF') && !issuingNo.startsWith('JJG') && 
+                               !issuingNo.startsWith('SH') && !issuingNo.startsWith('HG') && !issuingNo.startsWith('AQ') && 
+                               !issuingNo.startsWith('ISO') && !issuingNo.startsWith('IEC');
+                    });
+                    break;
+                case 'all':
+                default:
+                    // 全部标准
+                    filteredStandards = originalStandards;
+                    break;
+            }
+            
+            // 渲染筛选后的列表
+            renderStandardList(filteredStandards);
+        }
+
+        // 渲染标准列表
+        function renderStandardList(standards) {
+            const container = document.getElementById('standard-list-container');
+            
+            if (!container) return;
+            
+            if (standards.length === 0) {
+                // 显示无数据信息
+                container.innerHTML = '<div class="text-center py-12"><i class="fa fa-book text-4xl text-gray-400 mb-4"></i><p class="text-gray-500">无相关数据</p></div>';
+            } else {
+                // 创建表格结构
+                const tableHTML = `
+                    <table id="standard-list" class="w-full text-sm text-left text-gray-700">
+                        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3">标准名称</th>
+                                <th scope="col" class="px-6 py-3">标准类型</th>
+                                <th scope="col" class="px-6 py-3">标准编号</th>
+                                <th scope="col" class="px-6 py-3">发布日期</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${standards.map(standard => `
+                                <tr class="hover:bg-gray-50 cursor-pointer" data-standard='${JSON.stringify(standard)}'>
+                                    <td class="px-6 py-4">${standard.doc_title}</td>
+                                    <td class="px-6 py-4">${standard.doc_type}</td>
+                                    <td class="px-6 py-4">${standard.issuing_no}</td>
+                                    <td class="px-6 py-4">${standard.release_date}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                
+                // 更新容器内容
+                container.innerHTML = tableHTML;
+                
+                // 添加点击事件监听器
+                const rows = container.querySelectorAll('tr[data-standard]');
+                rows.forEach(row => {
+                    row.addEventListener('click', () => {
+                        const standardData = JSON.parse(row.dataset.standard);
+                        openStandardPDF(standardData);
+                    });
+                });
+            }
+        }
+
+        // 打开标准PDF
+        function openStandardPDF(standard) {
+            try {
+                // 确保standard对象存在
+                if (!standard) {
+                    console.error('标准数据不存在');
+                    alert('标准数据不存在');
+                    return;
+                }
+                
+                // 获取文件名
+                const fileName = standard.file_name || '';
+                if (!fileName) {
+                    console.error('文件名不存在');
+                    alert('文件名不存在');
+                    return;
+                }
+                
+                // 构造标准路径
+                const pdfPath = '/static/material_center/standard_docs/' + fileName;
+                console.log('PDF路径:', pdfPath);
+                
+                // 使用<a>标签打开PDF
+                const link = document.createElement('a');
+                link.href = pdfPath;
+                link.target = '_blank';
+                link.textContent = '打开PDF';
+                
+                // 触发点击
+                link.click();
+                
+                // 清理
+                link.remove();
+                
+            } catch (error) {
+                console.error('打开PDF失败:', error);
+                alert('打开PDF失败，请检查文件路径是否正确');
+            }
+        }
+
+        // 标准规范搜索输入防抖处理
+        document.addEventListener('DOMContentLoaded', () => {
+            const searchInput = document.getElementById('standard-search');
+            if (searchInput) {
+                searchInput.addEventListener('input', function() {
+                    // 清除之前的定时器
+                    if (standardSearchTimeout) {
+                        clearTimeout(standardSearchTimeout);
+                    }
+                    
+                    // 设置新的定时器
+                    standardSearchTimeout = setTimeout(() => {
+                        const keyword = this.value.trim();
+                        // 只有输入至少2个汉字才搜索
+                        if (keyword.length >= 2) {
+                            searchStandards();
+                        } else {
+                            // 清空搜索框时隐藏下拉列表
+                            const resultsContainer = document.getElementById('standard-search-results');
+                            if (resultsContainer) {
+                                resultsContainer.classList.add('hidden');
+                            }
+                            selectedStandard = null;
+                        }
+                    }, 300); // 300ms防抖延迟
+                });
+                
+                // 点击页面其他地方隐藏下拉列表
+                document.addEventListener('click', function(e) {
+                    const searchContainer = document.querySelector('#db-standards .relative');
+                    const resultsContainer = document.getElementById('standard-search-results');
+                    
+                    if (searchContainer && resultsContainer && !searchContainer.contains(e.target)) {
+                        resultsContainer.classList.add('hidden');
+                    }
+                });
+            }
+        });
+        
+        // 企业制度搜索防抖计时器
+        let ruleSearchTimeout = null;
+        // 选中的制度数据
+        let selectedRule = null;
+        // 原始制度列表（用于筛选）
+        let originalRules = [];
+
+        // 企业制度搜索函数（显示下拉列表）
+        async function searchRules() {
+            const searchInput = document.getElementById('rule-search');
+            const keyword = searchInput ? searchInput.value.trim() : '';
+            const resultsContainer = document.getElementById('rule-search-results');
+            
+            // 最小搜索长度限制：至少2个汉字
+            if (keyword.length < 2 && keyword.length > 0) {
+                resultsContainer.classList.add('hidden');
+                return; // 不足2个汉字不搜索
+            }
+            
+            if (keyword.length === 0) {
+                resultsContainer.classList.add('hidden');
+                return;
+            }
+            
+            try {
+                // 调用API获取数据
+                const response = await fetch(`${API_BASE_URL}/policies/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({ keyword })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('网络请求失败');
+                }
+                
+                const data = await response.json();
+                const rules = data.success ? data.data : [];
+                
+                // 显示下拉列表
+                if (rules.length > 0) {
+                    renderRuleSearchResults(rules);
+                } else {
+                    resultsContainer.classList.add('hidden');
+                }
+            } catch (error) {
+                console.error('搜索制度失败:', error);
+                resultsContainer.classList.add('hidden');
+            }
+        }
+
+        // 渲染制度搜索下拉列表
+        function renderRuleSearchResults(rules) {
+            const resultsContainer = document.getElementById('rule-search-results');
+            if (!resultsContainer) return;
+            
+            // 清空之前的结果
+            resultsContainer.innerHTML = '';
+            
+            // 添加搜索结果
+            rules.forEach(rule => {
+                const resultItem = document.createElement('div');
+                resultItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer';
+                resultItem.innerHTML = `
+                    <div class="font-medium">${rule.policy_name}</div>
+                    <div class="text-xs text-gray-500">${rule.policy_type} | ${rule.policy_code} | ${rule.publish_time}</div>
+                `;
+                
+                // 添加点击事件
+                resultItem.addEventListener('click', () => {
+                    selectRule(rule);
+                });
+                
+                resultsContainer.appendChild(resultItem);
+            });
+            
+            // 显示下拉列表
+            resultsContainer.classList.remove('hidden');
+        }
+
+        // 选择制度
+        function selectRule(rule) {
+            const searchInput = document.getElementById('rule-search');
+            const resultsContainer = document.getElementById('rule-search-results');
+            
+            if (searchInput) {
+                searchInput.value = rule.policy_name;
+            }
+            
+            // 存储选中的制度
+            selectedRule = rule;
+            
+            // 隐藏下拉列表
+            resultsContainer.classList.add('hidden');
+        }
+
+        // 查询制度（打开PDF）
+        function queryRule() {
+            if (selectedRule) {
+                openRulePDF(selectedRule);
+            } else {
+                // 如果没有选择，提示用户
+                alert('请先搜索并选择一个制度');
+            }
+        }
+
+        // 加载完整制度列表
+        async function loadRuleList() {
+            const container = document.getElementById('rule-list-container');
+            
+            if (container) {
+                container.innerHTML = '<div class="text-center py-12"><i class="fa fa-spinner fa-spin text-4xl text-gray-400 mb-4"></i><p class="text-gray-500">加载中...</p></div>';
+            }
+            
+            try {
+                // 调用API获取完整制度列表
+                const response = await fetch(`${API_BASE_URL}/policies/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({ keyword: '' }) // 空关键词获取完整列表
+                });
+                
+                if (!response.ok) {
+                    throw new Error('网络请求失败');
+                }
+                
+                const data = await response.json();
+                const rules = data.success ? data.data : [];
+                
+                // 保存原始列表
+                originalRules = rules;
+                
+                // 按制度编号的字母顺序排序
+                rules.sort((a, b) => {
+                    const policyCodeA = a.policy_code || '';
+                    const policyCodeB = b.policy_code || '';
+                    return policyCodeA.localeCompare(policyCodeB);
+                });
+                
+                // 渲染制度列表
+                renderRuleList(rules);
+            } catch (error) {
+                console.error('加载制度列表失败:', error);
+                
+                if (container) {
+                    container.innerHTML = '<div class="text-center py-12"><i class="fa fa-exclamation-circle text-4xl text-red-400 mb-4"></i><p class="text-red-500">加载失败，请稍后重试</p></div>';
+                }
+            }
+        }
+
+        // 渲染制度列表
+        function renderRuleList(rules) {
+            const container = document.getElementById('rule-list-container');
+            
+            if (!container) return;
+            
+            if (rules.length === 0) {
+                // 显示无数据信息
+                container.innerHTML = '<div class="text-center py-12"><i class="fa fa-file-text text-4xl text-gray-400 mb-4"></i><p class="text-gray-500">无相关数据</p></div>';
+            } else {
+                // 创建表格结构
+                const tableHTML = `
+                    <table id="rule-list" class="w-full text-sm text-left text-gray-700">
+                        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3">制度名称</th>
+                                <th scope="col" class="px-6 py-3">制度类型</th>
+                                <th scope="col" class="px-6 py-3">制度编号</th>
+                                <th scope="col" class="px-6 py-3">发布日期</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rules.map(rule => `
+                                <tr class="hover:bg-gray-50 cursor-pointer" data-rule='${JSON.stringify(rule)}'>
+                                    <td class="px-6 py-4">${rule.policy_name}</td>
+                                    <td class="px-6 py-4">${rule.policy_type}</td>
+                                    <td class="px-6 py-4">${rule.policy_code}</td>
+                                    <td class="px-6 py-4">${rule.publish_time}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                
+                // 更新容器内容
+                container.innerHTML = tableHTML;
+                
+                // 添加点击事件监听器
+                const rows = container.querySelectorAll('tr[data-rule]');
+                rows.forEach(row => {
+                    row.addEventListener('click', () => {
+                        const ruleData = JSON.parse(row.dataset.rule);
+                        openRulePDF(ruleData);
+                    });
+                });
+            }
+        }
+
+        // 打开制度PDF
+        function openRulePDF(rule) {
+            try {
+                // 确保rule对象存在
+                if (!rule) {
+                    console.error('制度数据不存在');
+                    alert('制度数据不存在');
+                    return;
+                }
+                
+                // 使用制度名称作为文件名
+                const fileName = rule.policy_name ? rule.policy_name.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_') + '.pdf' : '';
+                if (!fileName) {
+                    console.error('文件名不存在');
+                    alert('文件名不存在');
+                    return;
+                }
+                
+                // 构造标准路径
+                const pdfPath = '/static/material_center/policy_docs/' + fileName;
+                console.log('PDF路径:', pdfPath);
+                
+                // 使用<a>标签打开PDF
+                const link = document.createElement('a');
+                link.href = pdfPath;
+                link.target = '_blank';
+                link.textContent = '打开PDF';
+                
+                // 触发点击
+                link.click();
+                
+                // 清理
+                link.remove();
+                
+            } catch (error) {
+                console.error('打开PDF失败:', error);
+                alert('打开PDF失败，请检查文件路径是否正确');
+            }
+        }
+
+        // 企业制度搜索输入防抖处理
+        document.addEventListener('DOMContentLoaded', () => {
+            const searchInput = document.getElementById('rule-search');
+            if (searchInput) {
+                searchInput.addEventListener('input', function() {
+                    // 清除之前的定时器
+                    if (ruleSearchTimeout) {
+                        clearTimeout(ruleSearchTimeout);
+                    }
+                    
+                    // 设置新的定时器
+                    ruleSearchTimeout = setTimeout(() => {
+                        const keyword = this.value.trim();
+                        // 只有输入至少2个汉字才搜索
+                        if (keyword.length >= 2) {
+                            searchRules();
+                        } else {
+                            // 清空搜索框时隐藏下拉列表
+                            const resultsContainer = document.getElementById('rule-search-results');
+                            if (resultsContainer) {
+                                resultsContainer.classList.add('hidden');
+                            }
+                        }
+                    }, 300); // 300ms防抖
+                });
+            }
+            
+            // 点击页面其他地方关闭搜索下拉列表
+            document.addEventListener('click', (e) => {
+                const searchContainer = document.querySelector('#db-rules .relative');
+                const resultsContainer = document.getElementById('rule-search-results');
+                
+                if (searchContainer && resultsContainer && !searchContainer.contains(e.target)) {
+                    resultsContainer.classList.add('hidden');
+                }
+            });
+            
+            // 检查当前是否在企业制度页面
+            const rulesPage = document.getElementById('db-rules');
+            if (rulesPage && !rulesPage.classList.contains('hidden')) {
+                loadRuleList();
+            }
+            
+            // 监听菜单点击，当切换到企业制度页面时加载列表
+            document.querySelectorAll('.menu-item[data-target="db-rules"]').forEach(item => {
+                item.addEventListener('click', function() {
+                    // 延迟加载，确保页面已显示
+                    setTimeout(loadRuleList, 100);
+                });
+            });
+        });
+        
+        // 打开法规PDF
+        function openLawPDF(law) {
+            try {
+                // 确保law对象存在
+                if (!law) {
+                    console.error('法规数据不存在');
+                    alert('法规数据不存在');
+                    return;
+                }
+                
+                // 获取文件名
+                const fileName = law.file_name || '';
+                if (!fileName) {
+                    console.error('文件名不存在');
+                    alert('文件名不存在');
+                    return;
+                }
+                
+                // 构造标准路径
+                const pdfPath = '/static/material_center/laws_docs/' + fileName;
+                console.log('PDF路径:', pdfPath);
+                
+                // 使用<a>标签打开PDF
+                const link = document.createElement('a');
+                link.href = pdfPath;
+                link.target = '_blank';
+                link.textContent = '打开PDF';
+                
+                // 触发点击
+                link.click();
+                
+                // 清理
+                link.remove();
+                
+            } catch (error) {
+                console.error('打开PDF失败:', error);
+                alert('打开PDF失败，请检查文件路径是否正确');
+            }
+        }
+        
+
+        
+        // 历史搜索函数，直接写在页面确保能找到
+        window.searchDevices = function() {
+            const searchInput = document.getElementById('device-search');
+            const searchResults = document.getElementById('search-results');
+            
+            if (!searchInput || !searchResults) return;
+            
+            const keyword = searchInput.value.trim();
+            // 空关键词直接隐藏结果，和历史报警逻辑完全一致
+            if (!keyword) {
+                searchResults.classList.add('hidden');
+                return;
+            }
+            
+            // 检查deviceData是否已经加载
+            if (!window.deviceData || Object.keys(window.deviceData).length === 0) {
+                searchResults.innerHTML = '<div class="px-3 py-2 text-gray-500">设备数据正在加载，请稍候...</div>';
+                searchResults.classList.remove('hidden');
+                return;
+            }
+            
+            // 从设备数据中搜索匹配的设备
+            const matchedDevices = Object.keys(window.deviceData).filter(deviceName => 
+                deviceName.toLowerCase().includes(keyword.toLowerCase()) ||
+                (window.deviceData[deviceName].desc && window.deviceData[deviceName].desc.toLowerCase().includes(keyword.toLowerCase()))
+            );
+            
+            // 显示搜索结果
+            searchResults.innerHTML = '';
+            searchResults.classList.remove('hidden');
+            matchedDevices.forEach(deviceName => {
+                // 已经选中的设备不显示在搜索结果中（完全依赖全局Map判断，避免重置后不一致）
+                const isSelected = window.selectedDevices ? window.selectedDevices.has(deviceName) : false;
+                if (isSelected) return;
+                
+                const device = window.deviceData[deviceName];
+                const item = document.createElement('div');
+                item.className = 'px-3 py-2 hover:bg-gray-100 cursor-pointer';
+                item.innerHTML = `
+                    <div class="font-medium">${deviceName}</div>
+                    <div class="text-xs text-gray-500">${device.desc || ''}</div>
+                `;
+                item.addEventListener('click', () => {
+                    window.addDeviceToSelection(deviceName, device);
+                    searchResults.classList.add('hidden');
+                    // 保留搜索关键词，方便继续搜索其他设备
+                    // searchInput.value = '';
+                });
+                searchResults.appendChild(item);
+            });
+            
+            if (matchedDevices.length === 0) {
+                searchResults.innerHTML = '<div class="px-3 py-2 text-gray-500">无匹配设备</div>';
+            }
+        }
+        
+        // 添加设备到已选列表（和报警页面逻辑完全一致）
+        window.addDeviceToSelection = function(deviceName, deviceInfo) {
+            const MAX_SELECTED_DEVICES = 8;
+            const container = document.getElementById('selected-devices-container');
+            const noDevicesMessage = document.getElementById('no-devices-message');
+            
+            if (!container || !noDevicesMessage) return;
+
+            // 保存设备数据到全局Map，给趋势图tooltip用
+            if (!window.selectedDevices) window.selectedDevices = new Map();
+            window.selectedDevices.set(deviceName, deviceInfo);
+            
+            // 检查设备是否已在选择列表中
+            const existingDevices = container.querySelectorAll('.history-device-tag');
+            if (existingDevices.length >= MAX_SELECTED_DEVICES) {
+                alert(`最多只能选择${MAX_SELECTED_DEVICES}个设备`);
+                return;
+            }
+            for (const device of existingDevices) {
+                if (device.dataset.deviceName === deviceName) {
+                    return; // 设备已存在，不再添加
+                }
+            }
+            
+            // 隐藏无设备消息
+            if (noDevicesMessage) {
+                noDevicesMessage.classList.add('hidden');
+            }
+            
+            // 创建设备标签
+            const deviceTag = document.createElement('div');
+            deviceTag.className = 'history-device-tag bg-gray-100 px-2 py-1 rounded-full text-xs flex items-center space-x-1';
+            deviceTag.dataset.deviceName = deviceName;
+            deviceTag.innerHTML = `
+                <span>${deviceName}</span>
+                <button class="text-gray-400 hover:text-gray-600" onclick="window.removeDeviceFromSelection('${deviceName}')">
+                    <i class="fa fa-times-circle"></i>
+                </button>
+            `;
+            
+            container.appendChild(deviceTag);
+        }
+        
+        // 从已选列表移除设备
+        window.removeDeviceFromSelection = function(deviceName) {
+            const container = document.getElementById('selected-devices-container');
+            const noDevicesMessage = document.getElementById('no-devices-message');
+            
+            if (!container) return;
+            
+            // 找到并删除对应设备标签
+            const deviceTag = container.querySelector(`.history-device-tag[data-device-name="${deviceName}"]`);
+            if (deviceTag) {
+                deviceTag.remove();
+            }
+            
+            // 同步删除全局Map里的设备，保证数据一致
+            if (window.selectedDevices) {
+                window.selectedDevices.delete(deviceName);
+            }
+            
+            // 如果没有设备了，显示无设备消息
+            const remainingDevices = container.querySelectorAll('.history-device-tag');
+            if (remainingDevices.length === 0 && noDevicesMessage) {
+                noDevicesMessage.classList.remove('hidden');
+            }
+            
+            // 更新图表
+            if (window.historyData && window.historyData.length > 0) {
+                window.updateHistoryChart(window.historyData);
+                window.updateHistoryTable(window.historyData);
+            }
+        }
+        
+        // 切换显示模式
+        window.switchDisplayMode = function(mode) {
+            const chartBtn = document.getElementById('chart-mode-btn');
+            const tableBtn = document.getElementById('table-mode-btn');
+            const chartDisplay = document.getElementById('chart-display');
+            const tableDisplay = document.getElementById('table-display');
+            
+            if (mode === 'chart') {
+                chartBtn.classList.add('bg-primary', 'text-white');
+                chartBtn.classList.remove('border', 'border-gray-300', 'text-gray-700');
+                tableBtn.classList.remove('bg-primary', 'text-white');
+                tableBtn.classList.add('border', 'border-gray-300', 'text-gray-700');
+                chartDisplay.style.display = 'block';
+                tableDisplay.style.display = 'none';
+                // 调整图表大小
+                if (window.historyChart) {
+                    window.historyChart.resize();
+                }
+            } else if (mode === 'table') {
+                tableBtn.classList.add('bg-primary', 'text-white');
+                tableBtn.classList.remove('border', 'border-gray-300', 'text-gray-700');
+                chartBtn.classList.remove('bg-primary', 'text-white');
+                chartBtn.classList.add('border', 'border-gray-300', 'text-gray-700');
+                chartDisplay.style.display = 'none';
+                tableDisplay.style.display = 'block';
+            }
+        }
+        
+        // 调试用：打印全局变量+测试图表
+        window.debugHistory = function() {
+            console.log('全局历史数据:', window.historyData);
+            console.log('WebSocket状态:', window.ws?.readyState);
+            
+            // 生成模拟数据测试图表
+            const mockData = [
+                {
+                    name: '测试设备1',
+                    datalist: Array.from({length: 10}, (_, i) => ({
+                        time: Date.now() - (10 - i) * 60000,
+                        val: Math.random() * 100
+                    }))
+                },
+                {
+                    name: '测试设备2',
+                    datalist: Array.from({length: 10}, (_, i) => ({
+                        time: Date.now() - (10 - i) * 60000,
+                        val: Math.random() * 50 + 50
+                    }))
+                }
+            ];
+            
+            window.historyData = mockData;
+            window.updateHistoryChart(mockData);
+            window.updateHistoryTable(mockData);
+            alert('已生成模拟测试数据，图表应该显示了');
+        }
+        
+        // 重置设备选择
+        window.resetDeviceSelection = function() {
+            const container = document.getElementById('selected-devices-container');
+            const noDevicesMessage = document.getElementById('no-devices-message');
+            
+            if (!container) return;
+            
+            // 只删除设备标签，保留no-devices-message元素，避免容器缩小
+            const deviceTags = container.querySelectorAll('.history-device-tag');
+            deviceTags.forEach(tag => tag.remove());
+            
+            if (noDevicesMessage) {
+                noDevicesMessage.classList.remove('hidden');
+            }
+            
+            // 清空全局已选设备Map，修复重置后无法选择相同设备的问题
+            if (window.selectedDevices) {
+                window.selectedDevices.clear();
+            }
+            
+            // 清空图表
+            if (window.historyChart) {
+                window.historyChart.clear();
+            }
+            window.historyData = [];
+        }
+        
+        // 渲染历史报警表格
+        window.renderHistoryAlarmTable = function(alarms) {
+            const tableBody = document.getElementById('history-alarm-data-table');
+            if (!tableBody) return;
+            
+            if (!alarms || alarms.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-400">暂无历史报警数据</td></tr>';
+                return;
+            }
+            
+            // 格式化时间的辅助函数
+            const formatTime = (timestamp) => {
+                if (!timestamp || timestamp === 0) return '-';
+                const date = new Date(timestamp);
+                return date.toLocaleString('zh-CN');
+            };
+            
+            // 渲染报警列表
+            tableBody.innerHTML = alarms.map(alarm => `
+                <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <td class="px-6 py-4">${formatTime(alarm.occurTime)}</td>
+                    <td class="px-6 py-4">${alarm.name || '-'}</td>
+                    <td class="px-6 py-4">
+                        <span class="px-2 py-0.5 rounded text-xs ${alarm.type.includes('高') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}">
+                            ${alarm.almdesc || alarm.type}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4">${alarm.triggerValue ? parseFloat(alarm.triggerValue).toFixed(2) : '-'} (阈值: ${alarm.limitValue ? parseFloat(alarm.limitValue).toFixed(2) : '-'})</td>
+                    <td class="px-6 py-4">${formatTime(alarm.clearTime || alarm.ackTime)}</td>
+                    <td class="px-6 py-4">${alarm.operator || '-'}</td>
+                </tr>
+            `).join('');
+        }
+        
+        // 查询历史报警数据
+        window.queryHistoryAlarm = function() {
+            // 防抖：点击后按钮禁用2秒，防止重复点击
+            const queryBtn = document.getElementById('query-history-alarm-btn');
+            if (queryBtn.disabled) return;
+            queryBtn.disabled = true;
+            queryBtn.textContent = '查询中...';
+            setTimeout(() => {
+                queryBtn.disabled = false;
+                queryBtn.textContent = '查询';
+            }, 2000);
+            
+            const startTimeInput = document.getElementById('alarm-history-start-time');
+            const endTimeInput = document.getElementById('alarm-history-end-time');
+            const alarmTypeSelect = document.getElementById('alarm-type-select');
+            
+            // 时间范围处理
+            let startTime, endTime;
+            if (startTimeInput.value && endTimeInput.value) {
+                startTime = new Date(startTimeInput.value).getTime();
+                endTime = new Date(endTimeInput.value).getTime();
+                
+                if (startTime >= endTime) {
+                    alert('开始时间不能晚于结束时间');
+                    return;
+                }
+            } else {
+                // 默认最近10分钟
+                endTime = Date.now();
+                startTime = endTime - 10 * 60 * 1000;
+            }
+            
+            // 报警类型处理
+            let alarmTypes = [];
+            const selectedType = alarmTypeSelect.value;
+            if (selectedType === 'high') alarmTypes = ['H', 'HH'];
+            if (selectedType === 'low') alarmTypes = ['L', 'LL'];
+            
+            // 设备列表处理：直接从容器获取所有选中的设备标签
+            const selectedContainer = document.getElementById('selected-alarm-devices-container');
+            const selectedDeviceTags = selectedContainer.querySelectorAll('div[data-device-name]');
+            const deviceNames = selectedDeviceTags.length > 0 
+                ? Array.from(selectedDeviceTags).map(tag => tag.dataset.deviceName) 
+                : []; // 空数组表示查询所有有权限的设备
+            
+            // 构造查询请求（100%匹配你给的协议格式）
+            const userId = parseInt(localStorage.getItem('userId') || '0');
+            const seq = Date.now() * 10000 + userId; // 13位时间戳 + 4位用户ID，100%唯一，便于排查问题
+            const queryMsg = {
+                method: "HistoryAlarm",
+                topic: "HisAlarm",
+                seq: seq,
+                type: alarmTypes,
+                names: deviceNames,
+                eventtype: 0,
+                begintime: startTime,
+                endtime: endTime
+            };
+            
+            // 通过WebSocket发送给后端（和FX发布格式完全一致）
+            if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+                window.ws.send(JSON.stringify({
+                    type: 'publish_mqtt',
+                    topic: 'SupconScadaHisAlarm',
+                    payload: queryMsg
+                }));
+                alert('历史报警查询请求已发送，请稍候...');
+            } else {
+                alert('WebSocket连接已断开，请刷新页面重试');
+            }
+        }
+        
+        // 查询历史数据
+        window.simpleQuery = function() {
+            const selectedDeviceTags = document.querySelectorAll('.history-device-tag');
+            if (selectedDeviceTags.length === 0) {
+                alert('请先选择要查询的设备');
+                return;
+            }
+            
+            // 收集已选设备
+            const deviceNames = Array.from(selectedDeviceTags).map(tag => tag.dataset.deviceName);
+            
+            // 获取时间范围：优先使用用户选择的时间，没有的话默认最近一小时
+            const startTimeInput = document.getElementById('history-start-time');
+            const endTimeInput = document.getElementById('history-end-time');
+            
+            let startTime, endTime;
+            if (startTimeInput.value && endTimeInput.value) {
+                // 转换为毫秒时间戳
+                startTime = new Date(startTimeInput.value).getTime();
+                endTime = new Date(endTimeInput.value).getTime();
+                
+                if (startTime >= endTime) {
+                    alert('开始时间不能晚于结束时间');
+                    return;
+                }
+            } else {
+                // 默认时间范围：最近10分钟
+                endTime = Date.now();
+                startTime = endTime - 10 * 60 * 1000;
+            }
+            
+            // 构造查询消息，完全按照给定格式
+            const queryMsg = {
+                method: "HistoryData",
+                topic: "hisdatatest",
+                names: deviceNames,
+                seq: Date.now(), // 用当前时间戳作为唯一序号
+                mode: 0,
+                begintime: startTime,
+                endtime: endTime,
+                count: 1000, // 查询最多1000个点
+                interval: 1000, // 时间间隔1秒
+                timeout: 20000
+            };
+            
+            // 通过WebSocket发送给后端，后端发布到SupconScadaHisData主题
+            if (window.ws && window.ws.readyState === WebSocket.OPEN) {
+                window.ws.send(JSON.stringify({
+                    type: 'publish_mqtt',
+                    topic: 'SupconScadaHisData',
+                    payload: queryMsg
+                }));
+                alert('查询请求已发送，请稍候...');
+            } else {
+                alert('WebSocket连接已断开，请刷新页面重试');
+            }
+        }
+    </script>
+</body>
+</html>
