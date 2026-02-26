@@ -65,16 +65,16 @@ function connectWebSocket() {
                     });
                 }
             }
+            // 处理新的实时报警推送
+            else if (message.type === 'alarm' && message.data) {
+                console.log('收到新的实时报警:', message.data);
+                processAlarmData(message.data);
+            }
             // 处理历史数据
             else if (message.type === 'history_data' && message.data) {
                 if (window.processHistoryData) {
                     window.processHistoryData(message); // 直接传完整消息
                 }
-            }
-            // 处理新的实时报警推送
-            else if (message.type === 'alarm' && message.data) {
-                console.log('收到新的实时报警:', message.data);
-                processAlarmData(message.data);
             }
             // 处理历史报警查询结果
             else if (message.type === 'history_alarm_result' && message.data) {

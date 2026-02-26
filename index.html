@@ -2806,25 +2806,18 @@
                 return;
             }
             
-            // 格式化时间的辅助函数
-            const formatTime = (timestamp) => {
-                if (!timestamp || timestamp === 0) return '-';
-                const date = new Date(timestamp);
-                return date.toLocaleString('zh-CN');
-            };
-            
             // 渲染报警列表
             tableBody.innerHTML = alarms.map(alarm => `
                 <tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <td class="px-6 py-4">${formatTime(alarm.occurTime)}</td>
-                    <td class="px-6 py-4">${alarm.name || '-'}</td>
+                    <td class="px-6 py-4">${alarm.time || '-'}</td>
+                    <td class="px-6 py-4">${alarm.deviceName || '-'}</td>
                     <td class="px-6 py-4">
                         <span class="px-2 py-0.5 rounded text-xs ${alarm.type.includes('高') ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}">
-                            ${alarm.almdesc || alarm.type}
+                            ${alarm.desc || alarm.type}
                         </span>
                     </td>
-                    <td class="px-6 py-4">${alarm.triggerValue ? parseFloat(alarm.triggerValue).toFixed(2) : '-'} (阈值: ${alarm.limitValue ? parseFloat(alarm.limitValue).toFixed(2) : '-'})</td>
-                    <td class="px-6 py-4">${formatTime(alarm.clearTime || alarm.ackTime)}</td>
+                    <td class="px-6 py-4">${alarm.value ? parseFloat(alarm.value).toFixed(2) : '-'} (阈值: ${alarm.limit ? parseFloat(alarm.limit).toFixed(2) : '-'})</td>
+                    <td class="px-6 py-4">${alarm.cancelTime || alarm.ackTime || '-'}</td>
                     <td class="px-6 py-4">${alarm.operator || '-'}</td>
                 </tr>
             `).join('');
@@ -2832,15 +2825,7 @@
         
         // 查询历史报警数据
         window.queryHistoryAlarm = function() {
-            // 防抖：点击后按钮禁用2秒，防止重复点击
             const queryBtn = document.getElementById('query-history-alarm-btn');
-            if (queryBtn.disabled) return;
-            queryBtn.disabled = true;
-            queryBtn.textContent = '查询中...';
-            setTimeout(() => {
-                queryBtn.disabled = false;
-                queryBtn.textContent = '查询';
-            }, 2000);
             
             const startTimeInput = document.getElementById('alarm-history-start-time');
             const endTimeInput = document.getElementById('alarm-history-end-time');
@@ -2870,14 +2855,13 @@
             
             // 设备列表处理：直接从容器获取所有选中的设备标签
             const selectedContainer = document.getElementById('selected-alarm-devices-container');
-            const selectedDeviceTags = selectedContainer.querySelectorAll('div[data-device-name]');
+            const selectedDeviceTags = selectedContainer.querySelectorAll('.alarm-device-tag');
             const deviceNames = selectedDeviceTags.length > 0 
                 ? Array.from(selectedDeviceTags).map(tag => tag.dataset.deviceName) 
                 : []; // 空数组表示查询所有有权限的设备
             
             // 构造查询请求（100%匹配你给的协议格式）
-            const userId = parseInt(localStorage.getItem('userId') || '0');
-            const seq = Date.now() * 10000 + userId; // 13位时间戳 + 4位用户ID，100%唯一，便于排查问题
+            const seq = Date.now(); // 直接使用时间戳作为seq，与历史数据保持一致
             const queryMsg = {
                 method: "HistoryAlarm",
                 topic: "HisAlarm",

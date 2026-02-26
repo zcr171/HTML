@@ -2,7 +2,10 @@ const WebSocket = require('ws');
 const { getUserById, getUserDevices } = require('../db');
 const { parseFactoryLevel, factoriesToTopics } = require('../utils');
 const { initMQTTClient } = require('../mqtt');
-const { connectedClients, userInfoCache, userDeviceCache, userMqttClients, userAlarmSubscribed, historyAlarmQueryMap } = require('../cache');
+const { connectedClients, userInfoCache, userDeviceCache, userMqttClients, userAlarmSubscribed, historyAlarmQueryMap, historyDataQueryMap } = require('../cache');
+
+// 报警订阅计数
+let alarmSubscribedCount = 0;
 
 
 let wss = null;
@@ -128,18 +131,30 @@ function initWebSocketServer(server) {
               const isAlarm = data.topic === 'SupconScadaHisAlarm';
               if (isAlarm) {
                 console.log('✅ 历史报警查询用户ID已记录:', userId);
+              } else {
+                console.log('✅ 历史数据查询用户ID已记录:', userId);
               }
               
               // 保存seq->用户ID映射，解决多用户并发串数据
               const seq = data.payload.seq;
               if (seq !== undefined) {
-                historyAlarmQueryMap.set(seq, userId);
-                console.log(`✅ 历史查询映射已保存 seq:${seq} -> 用户ID:${userId}, 类型:${isAlarm ? '报警' : '数据'}`);
-                
-                // 1分钟后自动删除过期映射，避免内存泄漏
-                setTimeout(() => {
-                  historyAlarmQueryMap.delete(seq);
-                }, 60 * 1000);
+                if (isAlarm) {
+                  historyAlarmQueryMap.set(seq, userId);
+                  console.log(`✅ 历史报警查询映射已保存 seq:${seq} -> 用户ID:${userId}`);
+                  
+                  // 1分钟后自动删除过期映射，避免内存泄漏
+                  setTimeout(() => {
+                    historyAlarmQueryMap.delete(seq);
+                  }, 60 * 1000);
+                } else {
+                  historyDataQueryMap.set(seq, userId);
+                  console.log(`✅ 历史数据查询映射已保存 seq:${seq} -> 用户ID:${userId}`);
+                  
+                  // 1分钟后自动删除过期映射，避免内存泄漏
+                  setTimeout(() => {
+                    historyDataQueryMap.delete(seq);
+                  }, 60 * 1000);
+                }
               }
               
               console.log(`✅ 历史查询请求已发送 主题:${data.topic}`);
@@ -166,10 +181,52 @@ function initWebSocketServer(server) {
           // 更新用户订阅状态
           if (isSubscribe) {
             userAlarmSubscribed.set(userId, true);
+            alarmSubscribedCount++;
             console.log(`✅ 用户 ${userId} 已订阅实时报警`);
+            // 如果是第一个订阅的用户，向SCADA发送订阅请求
+            if (alarmSubscribedCount === 1) {
+              const { getGlobalAlarmMqttClient } = require('../mqtt');
+              const globalAlarmMqttClient = getGlobalAlarmMqttClient();
+              if (globalAlarmMqttClient && globalAlarmMqttClient.connected) {
+                const subscribeMsg = {
+                  method: "RealAlarm",
+                  state: 0,
+                  topic: "backend/real/alarm"
+                };
+                globalAlarmMqttClient.publish("SupconScadaRealAlarm", JSON.stringify(subscribeMsg), (err) => {
+                  if (err) {
+                    console.error('发送订阅报警请求失败:', err);
+                  } else {
+                    console.log('已向SCADA发送订阅实时报警请求');
+                  }
+                });
+              }
+            }
           } else {
-            userAlarmSubscribed.delete(userId);
-            console.log(`✅ 用户 ${userId} 已取消订阅实时报警`);
+            if (userAlarmSubscribed.has(userId)) {
+              userAlarmSubscribed.delete(userId);
+              alarmSubscribedCount--;
+              console.log(`✅ 用户 ${userId} 已取消订阅实时报警`);
+              // 如果没有用户订阅了，向SCADA发送取消订阅请求
+              if (alarmSubscribedCount === 0) {
+                const { getGlobalAlarmMqttClient } = require('../mqtt');
+                const globalAlarmMqttClient = getGlobalAlarmMqttClient();
+                if (globalAlarmMqttClient && globalAlarmMqttClient.connected) {
+                  const unsubscribeMsg = {
+                    method: "RealAlarm",
+                    state: 1,
+                    topic: "backend/real/alarm"
+                  };
+                  globalAlarmMqttClient.publish("SupconScadaRealAlarm", JSON.stringify(unsubscribeMsg), (err) => {
+                    if (err) {
+                      console.error('发送取消订阅报警请求失败:', err);
+                    } else {
+                      console.log('已向SCADA发送取消订阅实时报警请求');
+                    }
+                  });
+                }
+              }
+            }
           }
         }
       } catch (error) {

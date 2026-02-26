@@ -22,6 +22,18 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    // 检查数据库连接状态
+    try {
+      const connection = await pool.getConnection();
+      connection.release();
+    } catch (dbError) {
+      console.error('数据库连接失败:', dbError);
+      return res.status(503).json({ 
+        success: false, 
+        message: '数据库连接失败，请稍后重试' 
+      });
+    }
+
     // 查询用户
     const [results] = await pool.execute(
       'SELECT * FROM web_user WHERE username = ?', 
@@ -91,10 +103,17 @@ router.post('/login', async (req, res) => {
 
   } catch (error) {
     console.error('登录接口错误:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: '服务器内部错误' 
-    });
+    if (error.code === 'ECONNREFUSED') {
+      res.status(503).json({ 
+        success: false, 
+        message: '数据库连接失败，请稍后重试' 
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        message: '服务器内部错误' 
+      });
+    }
   }
 });
 

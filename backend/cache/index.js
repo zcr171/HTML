@@ -18,11 +18,15 @@ const userAlarmSubscribed = new Map();
 // 历史报警查询映射
 const historyAlarmQueryMap = new Map();
 
+// 历史数据查询映射
+const historyDataQueryMap = new Map();
+
 module.exports = {
   connectedClients,
   userInfoCache,
   userDeviceCache,
   userMqttClients,
   userAlarmSubscribed,
-  historyAlarmQueryMap
+  historyAlarmQueryMap,
+  historyDataQueryMap
 };

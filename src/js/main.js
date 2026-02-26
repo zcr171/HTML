@@ -240,7 +240,7 @@ window.toggleAlarmSubscription = function() {
     if (window.ws && window.ws.readyState === WebSocket.OPEN) {
         window.ws.send(JSON.stringify({
             type: 'alarm_subscribe',
-            state: window.alarmSubscribed ? 1 : 0
+            state: window.alarmSubscribed ? 0 : 1
         }));
     }
     

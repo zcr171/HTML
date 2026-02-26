@@ -2,7 +2,7 @@ require('dotenv').config();
 
 module.exports = {
   // 服务配置
-  PORT: process.env.PORT || 3004,
+  PORT: process.env.PORT || 3003,
   JWT_SECRET: process.env.JWT_SECRET || 'your-secret-key',
   SUPER_ADMIN_LEVEL: 99,
 
@@ -50,7 +50,7 @@ module.exports = {
   // SCADA主题配置
   SCADA_TOPICS: {
     HISTORY_DATA: 'hisdatatest',
-    HISTORY_ALARM: 'SupconScadaHisAlarm',
+    HISTORY_ALARM: 'HisAlarm',
     REALTIME_ALARM: 'backend/real/alarm'
   }
 };
