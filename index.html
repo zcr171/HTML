@@ -1261,11 +1261,62 @@
                 </div>
                 <div id="db-drawings" class="page-content hidden">
                     <div class="mb-6">
+                        <div class="card mb-4">
+                            <div class="p-4">
+                                <div class="relative">
+                                    <div class="flex space-x-2">
+                                        <input type="text" id="drawing-search" placeholder="搜索图纸名称或编号..." autocomplete="off" class="flex-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent p-2">
+                                        <button onclick="queryDrawing()" class="px-4 py-2 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                                            <i class="fa fa-search mr-1"></i> 查询
+                                        </button>
+                                    </div>
+                                    <!-- 搜索下拉列表 -->
+                                    <div id="drawing-search-results" class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto hidden">
+                                    </div>
+                                </div>
+                                <!-- 分类卡片 -->
+                                <div class="flex flex-wrap gap-2 mt-3">
+                                    <button onclick="filterDrawings('all')" class="px-3 py-1 text-xs bg-primary text-white rounded-full hover:bg-primary/90 transition-colors">
+                                        全部
+                                    </button>
+                                    <button onclick="filterDrawings('process')" class="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors">
+                                        工艺图纸
+                                    </button>
+                                    <button onclick="filterDrawings('equipment')" class="px-3 py-1 text-xs bg-green-100 text-green-700 rounded-full hover:bg-green-200 transition-colors">
+                                        设备图纸
+                                    </button>
+                                    <button onclick="filterDrawings('electrical')" class="px-3 py-1 text-xs bg-yellow-100 text-yellow-700 rounded-full hover:bg-yellow-200 transition-colors">
+                                        电气图纸
+                                    </button>
+                                    <button onclick="filterDrawings('instrument')" class="px-3 py-1 text-xs bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 transition-colors">
+                                        仪表图纸
+                                    </button>
+                                    <button onclick="filterDrawings('other')" class="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 transition-colors">
+                                        其他
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         <div class="card">
-                            <div class="p-6">
-                                <div class="text-center py-12">
-                                    <i class="fa fa-paint-brush text-4xl text-gray-400 mb-4"></i>
-                                    <p class="text-gray-500">图纸中心内容将在此显示</p>
+                            <div class="p-4">
+                                <div id="drawing-list-container">
+                                    <div class="text-center py-12" id="no-drawings-message">
+                                        <i class="fa fa-paint-brush text-4xl text-gray-400 mb-4"></i>
+                                        <p class="text-gray-500">无相关数据</p>
+                                    </div>
+                                    <table id="drawing-list" class="w-full text-sm text-left text-gray-700 hidden">
+                                        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                            <tr>
+                                                <th scope="col" class="px-6 py-3">图纸名称</th>
+                                                <th scope="col" class="px-6 py-3">图纸类型</th>
+                                                <th scope="col" class="px-6 py-3">图纸编号</th>
+                                                <th scope="col" class="px-6 py-3">版本号</th>
+                                                <th scope="col" class="px-6 py-3">发布日期</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                         </div>
@@ -1898,6 +1949,34 @@
                 });
             });
             
+            // 检查当前是否在企业制度页面
+            const rulesPage = document.getElementById('db-rules');
+            if (rulesPage && !rulesPage.classList.contains('hidden')) {
+                loadRuleList();
+            }
+            
+            // 监听菜单点击，当切换到企业制度页面时加载列表
+            document.querySelectorAll('.menu-item[data-target="db-rules"]').forEach(item => {
+                item.addEventListener('click', function() {
+                    // 延迟加载，确保页面已显示
+                    setTimeout(loadRuleList, 100);
+                });
+            });
+            
+            // 检查当前是否在图纸中心页面
+            const drawingsPage = document.getElementById('db-drawings');
+            if (drawingsPage && !drawingsPage.classList.contains('hidden')) {
+                loadDrawingList();
+            }
+            
+            // 监听菜单点击，当切换到图纸中心页面时加载列表
+            document.querySelectorAll('.menu-item[data-target="db-drawings"]').forEach(item => {
+                item.addEventListener('click', function() {
+                    // 延迟加载，确保页面已显示
+                    setTimeout(loadDrawingList, 100);
+                });
+            });
+            
             // 标准规范搜索回车事件
             document.getElementById('standard-search')?.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') searchStandards();
@@ -1907,7 +1986,269 @@
             document.getElementById('rule-search')?.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') searchRules();
             });
+            
+            // 图纸中心搜索回车事件
+            document.getElementById('drawing-search')?.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') searchDrawings();
+            });
+            
+            // 图纸中心搜索输入防抖处理
+            const drawingSearchInput = document.getElementById('drawing-search');
+            if (drawingSearchInput) {
+                drawingSearchInput.addEventListener('input', function() {
+                    // 清除之前的定时器
+                    if (drawingSearchTimeout) {
+                        clearTimeout(drawingSearchTimeout);
+                    }
+                    
+                    // 设置新的定时器
+                    drawingSearchTimeout = setTimeout(() => {
+                        const keyword = this.value.trim();
+                        // 只有输入至少2个汉字才搜索
+                        if (keyword.length >= 2) {
+                            searchDrawings();
+                        } else {
+                            // 清空搜索框时隐藏下拉列表
+                            const resultsContainer = document.getElementById('drawing-search-results');
+                            if (resultsContainer) {
+                                resultsContainer.classList.add('hidden');
+                            }
+                            selectedDrawing = null;
+                        }
+                    }, 300); // 300ms防抖延迟
+                });
+                
+                // 点击页面其他地方隐藏下拉列表
+                document.addEventListener('click', function(e) {
+                    const searchContainer = document.querySelector('#db-drawings .relative');
+                    const resultsContainer = document.getElementById('drawing-search-results');
+                    
+                    if (searchContainer && resultsContainer && !searchContainer.contains(e.target)) {
+                        resultsContainer.classList.add('hidden');
+                    }
+                });
+            }
         });
+        
+        // 图纸中心搜索防抖计时器
+        let drawingSearchTimeout = null;
+        // 选中的图纸数据
+        let selectedDrawing = null;
+        // 原始图纸列表（用于筛选）
+        let originalDrawings = [];
+
+        // 图纸中心搜索函数（显示下拉列表）
+        async function searchDrawings() {
+            const searchInput = document.getElementById('drawing-search');
+            const keyword = searchInput ? searchInput.value.trim() : '';
+            const resultsContainer = document.getElementById('drawing-search-results');
+            
+            // 最小搜索长度限制：至少2个汉字
+            if (keyword.length < 2 && keyword.length > 0) {
+                resultsContainer.classList.add('hidden');
+                return; // 不足2个汉字不搜索
+            }
+            
+            if (keyword.length === 0) {
+                resultsContainer.classList.add('hidden');
+                return;
+            }
+            
+            try {
+                // 调用API获取数据
+                const response = await fetch(`${API_BASE_URL}/drawings/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({ keyword })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('网络请求失败');
+                }
+                
+                const data = await response.json();
+                const drawings = data.success ? data.data : [];
+                
+                // 显示下拉列表
+                if (drawings.length > 0) {
+                    renderDrawingSearchResults(drawings);
+                } else {
+                    resultsContainer.classList.add('hidden');
+                }
+            } catch (error) {
+                console.error('搜索图纸失败:', error);
+                resultsContainer.classList.add('hidden');
+            }
+        }
+
+        // 渲染图纸搜索下拉列表
+        function renderDrawingSearchResults(drawings) {
+            const resultsContainer = document.getElementById('drawing-search-results');
+            if (!resultsContainer) return;
+            
+            // 清空之前的结果
+            resultsContainer.innerHTML = '';
+            
+            // 添加搜索结果
+                drawings.forEach(drawing => {
+                    const resultItem = document.createElement('div');
+                    resultItem.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer';
+                    resultItem.innerHTML = `
+                        <div class="font-medium">${drawing.drawing_title}</div>
+                        <div class="text-xs text-gray-500">${drawing.drawing_type} | ${drawing.drawing_no} | 版本: ${drawing.version} | ${drawing.release_date}</div>
+                    `;
+                    
+                    // 添加点击事件
+                    resultItem.addEventListener('click', () => {
+                        selectDrawing(drawing);
+                    });
+                    
+                    resultsContainer.appendChild(resultItem);
+                });
+            
+            // 显示下拉列表
+            resultsContainer.classList.remove('hidden');
+        }
+
+        // 选择图纸
+        function selectDrawing(drawing) {
+            const searchInput = document.getElementById('drawing-search');
+            const resultsContainer = document.getElementById('drawing-search-results');
+            
+            if (searchInput) {
+                searchInput.value = drawing.drawing_title;
+            }
+            
+            // 存储选中的图纸
+            selectedDrawing = drawing;
+            
+            // 隐藏下拉列表
+            resultsContainer.classList.add('hidden');
+        }
+
+        // 查询图纸（打开PDF）
+        function queryDrawing() {
+            if (selectedDrawing) {
+                openDrawingPDF(selectedDrawing);
+            } else {
+                // 如果没有选择，提示用户
+                alert('请先搜索并选择一个图纸');
+            }
+        }
+
+        // 加载完整图纸列表
+        async function loadDrawingList() {
+            const container = document.getElementById('drawing-list-container');
+            
+            if (container) {
+                container.innerHTML = '<div class="text-center py-12"><i class="fa fa-spinner fa-spin text-4xl text-gray-400 mb-4"></i><p class="text-gray-500">加载中...</p></div>';
+            }
+            
+            try {
+                // 调用API获取完整图纸列表
+                const response = await fetch(`${API_BASE_URL}/drawings/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({ keyword: '' }) // 空关键词获取完整列表
+                });
+                
+                if (!response.ok) {
+                    throw new Error('网络请求失败');
+                }
+                
+                const data = await response.json();
+                const drawings = data.success ? data.data : [];
+                
+                // 存储原始列表用于筛选
+                originalDrawings = drawings;
+                
+                // 渲染图纸列表
+                renderDrawingList(drawings);
+            } catch (error) {
+                console.error('加载图纸列表失败:', error);
+                
+                if (container) {
+                    container.innerHTML = '<div class="text-center py-12"><i class="fa fa-exclamation-circle text-4xl text-red-400 mb-4"></i><p class="text-red-500">加载失败，请稍后重试</p></div>';
+                }
+            }
+        }
+
+        // 渲染图纸列表
+        function renderDrawingList(drawings) {
+            const container = document.getElementById('drawing-list-container');
+            
+            if (!container) return;
+            
+            if (drawings.length === 0) {
+                // 显示无数据信息
+                container.innerHTML = '<div class="text-center py-12"><i class="fa fa-paint-brush text-4xl text-gray-400 mb-4"></i><p class="text-gray-500">无相关数据</p></div>';
+            } else {
+                // 创建表格结构
+                const tableHTML = `
+                    <table id="drawing-list" class="w-full text-sm text-left text-gray-700">
+                        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3">图纸名称</th>
+                                <th scope="col" class="px-6 py-3">图纸类型</th>
+                                <th scope="col" class="px-6 py-3">图纸编号</th>
+                                <th scope="col" class="px-6 py-3">版本号</th>
+                                <th scope="col" class="px-6 py-3">发布日期</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${drawings.map(drawing => `
+                                <tr class="hover:bg-gray-50 cursor-pointer" data-drawing='${JSON.stringify(drawing)}'>
+                                    <td class="px-6 py-4">${drawing.drawing_title}</td>
+                                    <td class="px-6 py-4">${drawing.drawing_type}</td>
+                                    <td class="px-6 py-4">${drawing.drawing_no}</td>
+                                    <td class="px-6 py-4">${drawing.version}</td>
+                                    <td class="px-6 py-4">${drawing.release_date}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                
+                // 更新容器内容
+                container.innerHTML = tableHTML;
+                
+                // 添加点击事件监听器
+                const rows = container.querySelectorAll('tr[data-drawing]');
+                rows.forEach(row => {
+                    row.addEventListener('click', () => {
+                        const drawingData = JSON.parse(row.dataset.drawing);
+                        openDrawingPDF(drawingData);
+                    });
+                });
+            }
+        }
+
+        // 筛选图纸
+        function filterDrawings(filterType) {
+            let filteredDrawings = originalDrawings;
+            
+            if (filterType !== 'all') {
+                // 根据类型筛选
+                filteredDrawings = originalDrawings.filter(drawing => {
+                    return drawing.drawing_type.toLowerCase().includes(filterType.toLowerCase());
+                });
+            }
+            
+            // 重新渲染列表
+            renderDrawingList(filteredDrawings);
+        }
+
+        // 打开图纸PDF
+        function openDrawingPDF(drawing) {
+            // 打开图纸PDF
+            window.open(`${API_BASE_URL}/drawings/pdf/${drawing.id}`, '_blank');
+        }
         
         // 标准规范搜索防抖计时器
         let standardSearchTimeout = null;

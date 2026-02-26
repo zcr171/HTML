@@ -299,6 +299,112 @@ router.post('/policies/search', async (req, res) => {
   }
 });
 
+// 图纸中心搜索接口
+router.post('/drawings/search', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ 
+        success: false, 
+        message: '未授权访问' 
+      });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
+    const { keyword } = req.body;
+    
+    let query = `
+      SELECT id, drawing_name, doc_type, issue_date, file_path, file_size, file_ext, description 
+      FROM drawing_docs 
+      WHERE is_deleted = 0
+    `;
+    let params = [];
+    
+    if (keyword) {
+      query += ` AND (drawing_name LIKE ?)`;
+      params = [`%${keyword}%`];
+    }
+    
+    // 执行查询
+    const [rows] = await pool.execute(query, params);
+    
+    // 处理结果，转换为前端需要的格式
+    const formattedRows = rows.map(row => ({
+      id: row.id,
+      drawing_title: row.drawing_name,
+      drawing_type: row.doc_type,
+      drawing_no: row.id, // 暂时使用ID作为图纸编号
+      version: '1.0', // 暂时使用固定版本号
+      release_date: row.issue_date,
+      file_path: row.file_path,
+      file_size: row.file_size,
+      file_ext: row.file_ext,
+      description: row.description
+    }));
+    
+    // 返回结果
+    res.json({ success: true, data: formattedRows });
+  } catch (error) {
+    console.error('搜索图纸失败:', error);
+    res.json({ success: false, message: '搜索失败，请稍后重试' });
+  }
+});
+
+// 图纸PDF获取接口
+router.get('/drawings/pdf/:id', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ 
+        success: false, 
+        message: '未授权访问' 
+      });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const { id } = req.params;
+    
+    // 查询图纸信息
+    const [rows] = await pool.execute(
+      'SELECT drawing_name, file_path, file_ext FROM drawing_docs WHERE id = ? AND is_deleted = 0',
+      [id]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: '图纸不存在' 
+      });
+    }
+    
+    const drawing = rows[0];
+    const filePath = drawing.file_path;
+    const fileExt = drawing.file_ext;
+    
+    // 检查文件是否存在
+    const fs = require('fs');
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ 
+        success: false, 
+        message: '文件不存在' 
+      });
+    }
+    
+    // 设置响应头
+    res.setHeader('Content-Type', `application/${fileExt === 'pdf' ? 'pdf' : 'octet-stream'}`);
+    res.setHeader('Content-Disposition', `inline; filename="${drawing.drawing_name}.${fileExt}"`);
+    
+    // 发送文件
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+    
+  } catch (error) {
+    console.error('获取图纸PDF失败:', error);
+    res.status(500).json({ success: false, message: '获取失败，请稍后重试' });
+  }
+});
+
 // 历史数据查询接口
 router.get('/history/data', async (req, res) => {
   try {
