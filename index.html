@@ -36,22 +36,94 @@
         /* 综合概况卡片压缩样式 */
         .card .card-header {
             padding: 0.5rem 1rem !important;
+            font-size: 1.35rem !important;
         }
         .card .data-value {
-            font-size: 1.25rem !important;
+            font-size: 2.25rem !important;
             padding: 0.1rem 1rem !important;
             margin: 0 !important;
         }
         .card .text-sm {
             padding: 0 1rem 0.5rem 1rem !important;
-            font-size: 0.75rem !important;
+            font-size: 1.275rem !important;
         }
         .card p {
             margin: 0.1rem 0 !important;
+            font-size: 1.275rem !important;
         }
         .card td, .card th {
-            padding: 0.3rem 0.6rem !important;
-            font-size: 0.75rem !important;
+            padding: 0.4rem 0.75rem !important;
+            font-size: 1.275rem !important;
+        }
+        
+        /* 卡片美化 */
+        .card {
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            border-radius: 0.5rem;
+        }
+        
+        .card:hover {
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+            transform: translateY(-2px);
+        }
+        
+        /* 菜单样式优化 */
+        .menu-item {
+            transition: all 0.2s ease;
+        }
+        
+        .menu-item.active {
+            background-color: rgba(14, 165, 233, 0.3);
+            border-left: 3px solid #0ea5e9;
+        }
+        
+        .menu-item:hover {
+            background-color: rgba(255, 255, 255, 0.15);
+        }
+        
+        /* 菜单文本大小 - 覆盖text-sm类 */
+        .menu-item span,
+        .menu-group-header span {
+            font-size: 1.35rem !important;
+        }
+        
+        /* 菜单图标大小 */
+        .menu-item i,
+        .menu-group-header i {
+            font-size: 1.1rem !important;
+            width: 1.5rem !important;
+            text-align: center !important;
+        }
+        
+        /* 页面过渡动画 */
+        .page-content {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        
+        .page-content.hidden {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        
+        .page-content:not(.hidden) {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        /* 按钮美化 */
+        button {
+            transition: all 0.2s ease;
+        }
+        
+        button:hover {
+            transform: translateY(-1px);
+        }
+        
+        /* 输入框美化 */
+        input:focus,
+        select:focus {
+            transition: all 0.2s ease;
         }
     </style>
     <script>
@@ -68,7 +140,7 @@
                         success: '#10b981'
                     },
                     fontFamily: {
-                        sans: ['Inter', 'system-ui', 'sans-serif']
+                        sans: ['PingFang SC', 'Microsoft YaHei', 'Inter', 'system-ui', 'sans-serif']
                     }
                 }
             }
@@ -139,10 +211,10 @@
     
     <!-- 主系统界面 -->
     <div id="main-page" class="flex h-screen overflow-hidden">
-        <div class="sidebar w-40 flex flex-col py-6 px-2 text-white">
+        <div class="sidebar w-56 flex flex-col py-6 px-3 text-white">
             <div class="mb-12 text-center">
-                <h1 class="text-xl font-bold">企业管理与运维</h1>
-                <p class="text-xs text-gray-400">Industrial Internet</p>
+                <h1 class="text-2xl font-bold">自控信息站</h1>
+                <p class="text-sm text-gray-400">Industrial Internet</p>
             </div>
             <div class="flex flex-col space-y-3 w-full">
                 <!-- 主菜单：综合概况（默认显示） -->
@@ -213,12 +285,12 @@
                     </div>
                 </div>
 
-                <!-- 一级菜单：化工行业工具 -->
+                <!-- 一级菜单：专业工具 -->
                 <div class="menu-group">
                     <button class="menu-group-header flex items-center justify-between w-full px-2 py-2 rounded-lg hover:bg-white/10 text-gray-300 transition-all duration-300" data-group="chem-tools">
                         <div class="flex items-center space-x-2">
                             <i class="fa fa-calculator text-sm"></i>
-                            <span class="text-sm font-medium">化工行业工具</span>
+                            <span class="text-sm font-medium">专业工具</span>
                         </div>
                         <i class="fa fa-chevron-right text-xs transition-transform duration-300"></i>
                     </button>
